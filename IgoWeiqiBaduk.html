@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<title>Igo Weiqi Baduk</title>
+		<style>
+			.conflict {fill: grey;}
+			.player1 {fill: black;}
+			.player2 {fill: white;}
+			.grid {fill: #eaad6f;}
+			rect#board {fill: #fabd7f;}
+			rect#boardmargin {fill: grey;}
+		</style>
+	</head>
+	<body>
+		<select name="mousemode" onchange="mouseMode=this.value;">
+			<option value="singleClickToMove">Single-click to place stones.</option>
+			<option value="doubleClickToMove">Double-click to place stones.</option>
+		</select>
+		<button type="button" onclick="switchPlayer();">Pass</button>
+		<text>[Player <text id="playerIndicator">1</text> to move.]</text>
+		<svg id="svgBoard" viewBox="-0.6 -0.6 3.2 3.2" xmlns="http://www.w3.org/2000/svg">
+			<defs>
+				<mask id="4circles">
+					<rect x="0" y="0" width="1" height="1" fill="white"/>
+					<circle cx="0" cy="0" r="0.5" fill="black"/>
+					<circle cx="0" cy="1" r="0.5" fill="black"/>
+					<circle cx="1" cy="0" r="0.5" fill="black"/>
+					<circle cx="1" cy="1" r="0.5" fill="black"/>
+				</mask>
+				<symbol id="squareMinus4circles">
+					<rect x="0" y="0" width="1" height="1" mask="url(#4circles)"/>
+				</symbol>
+			</defs>
+			<rect id="boardmargin" x="-0.6" y="-0.6" rx="0.6" ry="0.6" width="3.2" height="3.2"/>
+			<rect id="board" x="-0.5" y="-0.5" rx="0.5" ry="0.5" width="3" height="3"/>
+			<g id="grid"/>
+			<g id="different2"/>
+			<g id="same3"/>
+			<g id="same2"/>
+			<g id="stones"/>
+			<circle class="player1" id="nextMove" cx="-2" cy="-2" r="0.45" fill-opacity="0.5" stroke="#7f7f7f" stroke-width="0.1"/>
+		</svg>
+		EastWest:
+		<input name="width" type="number" min="1" value="9"/>
+		NorthSouth:
+		<input name="height" type="number" min="1" value="9"/>
+		<button type="button" onclick="freshBoard();">Fresh board</button>
+		<br/>
+		<button type="button" onclick="initBoardWithText(document.querySelector('textarea[name=\'importPosition\']').value);">Import position</button>
+		<br/>
+		<textarea name="importPosition" rows="30" cols="80">
+GNU Go and Leela Zero terminal board positions accepted!
+The only characters that will be parsed are: '.', '+', 'O', 'X', '\n'!
+. . . . . . . . . . . . . X . . . . 19
+ 18 . . O . . . . . . . . O O O O X . . . 18
+ 17 . . O X X . O . O . . O X X X . X X . 17
+ 16 . . . O . X . . . O O X . X . X O O . 16
+ 15 . . . . . . . . X X X . X . X O O . . 15
+ 14 . . O O . X . . . . .(O). O . O X X . 14
+ 13 . O . . O . . . . . . O . . . . . . . 13
+ 12 . X X . . . . . . O . . . . O . X . . 12
+ 11 . . . . . . . . . . . . . . O X . . . 11
+ 10 . . . X . . . . . + . . . . O X . . . 10
+  9 . . . . . . X . . O . O . . . X . . .  9
+...X.........O.....
+  7 X X X . . . . . . . X . X . . X . . .  7
+  6 X O O O . . . O . . O X . . . . . . .  6
+  5 O O . . . . O . . . O X . . . X . . .  5
+  4 . . O O . X . . . + O . X . . + . . .  4
+  3 . . O X X . . O . . . O X . . X . . .  3
+  2 . . O . . . X . . . . O X X . . . . .  2
+  1 . . . . . . . . . . . O O X . . . . .  1
+    A B C D E F G H J K L M N \O/ P Q R S T
+The lines that have less valid characters than the line with the most valid characters will be culled. The northwest corner of the board is missing in this example.
+		</textarea>
+
+
+
+
+		<script type="text/javascript">
+//TODO: undo, game-tree, SmartGameFormat support
+
+boardMarginWidth = 0.1;
+gridLineWidth = 0.1;
+gridRows = 1;
+gridColumns = 1;
+
+var playerIndicator = document.getElementById('playerIndicator');
+var svgBoard = document.getElementById('svgBoard');
+var svgBoardMargin = svgBoard.getElementById('boardmargin');
+var svgBoardBoard = svgBoard.getElementById('board');
+var svgBoardGrid = svgBoard.getElementById('grid');
+var svgBoardStones = svgBoard.getElementById('stones');
+var svgBoardNextMove = svgBoard.getElementById('nextMove');
+
+var mouseMode = 'singleClickToMove';
+svgBoard.onmousemove = function(e) {
+	gridX = Math.min(gridColumns, Math.max(0, Math.round(-0.5 +
+		gridColumns * (e.clientX - svgBoard.getBoundingClientRect().x) / svgBoard.clientWidth)));
+	gridY = Math.min(gridRows, Math.max(0, Math.round(-0.5 +
+		gridRows * (e.clientY - svgBoard.getBoundingClientRect().y) / svgBoard.clientHeight)));
+	if (isIllegalMove(gridX, gridY)) {
+		gridX = gridY = -2;
+	}
+	svgBoardNextMove.setAttribute('cx', gridX);
+	svgBoardNextMove.setAttribute('cy', gridY);
+}
+svgBoard.onmouseout = function(e) {
+	svgBoardNextMove.setAttribute('cx', -2);
+	svgBoardNextMove.setAttribute('cy', -2);
+}
+svgBoard.ondblclick = function(e) {
+	gridX = Math.min(gridColumns, Math.max(0, Math.round(-0.5 +
+		gridColumns * (e.clientX - svgBoard.getBoundingClientRect().x) / svgBoard.clientWidth)));
+	gridY = Math.min(gridRows, Math.max(0, Math.round(-0.5 +
+		gridRows * (e.clientY - svgBoard.getBoundingClientRect().y) / svgBoard.clientHeight)));
+	switch (mouseMode) {
+		case 'doubleClickToMove':
+			playMove(gridX,gridY);
+	}
+}
+svgBoard.onclick = function(e) {
+	gridX = Math.min(gridColumns, Math.max(0, Math.round(-0.5 +
+		gridColumns * (e.clientX - svgBoard.getBoundingClientRect().x) / svgBoard.clientWidth)));
+	gridY = Math.min(gridRows, Math.max(0, Math.round(-0.5 +
+		gridRows * (e.clientY - svgBoard.getBoundingClientRect().y) / svgBoard.clientHeight)));
+	switch (mouseMode) {
+		case 'singleClickToMove':
+			playMove(gridX,gridY);
+	}
+}
+
+function playMove(x,y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if (!isIllegalMove(x, y)) {
+		koY=-1;
+		setVertex(x, y, playerToMove);
+		drawSvgStoneWithEffects(x,y)
+		vertex=x+'_'+y;
+		groupStoneSet[vertex]=new Set([vertex]);
+		groupLibertySet[vertex]=new Set();
+		if (getVertex(x + 1, y) === '.')
+			groupLibertySet[vertex].add((x + 1)+'_'+ y);
+		if (getVertex(x - 1, y) === '.')
+			groupLibertySet[vertex].add((x - 1)+'_'+ y);
+		if (getVertex(x, y + 1) === '.')
+			groupLibertySet[vertex].add(x+'_'+ (y+1))
+		if (getVertex(x, y - 1) === '.')
+			groupLibertySet[vertex].add(x+'_'+ (y-1))
+		groupId[x][y]=vertex;
+		mergeGroups(x+1, y,vertex);
+		mergeGroups(x-1, y,vertex);
+		mergeGroups(x, y+1,vertex);
+		mergeGroups(x, y-1,vertex);
+		subtractLiberty(x+1, y,vertex);
+		subtractLiberty(x-1, y,vertex);
+		subtractLiberty(x, y+1,vertex);
+		subtractLiberty(x, y-1,vertex);
+		switchPlayer();
+	}
+}
+
+function mergeGroups(x,y,id2) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	switch(getVertex(x,y)){
+		case '.':
+		case 'E':
+			return;
+		case getVertex(id2.split('_')[0],id2.split('_')[1]):
+			gid=groupId[x][y];
+			id2=groupId[id2.split('_')[0]][id2.split('_')[1]];
+			if(gid!==id2){
+				//TODO:make canonical
+				for (stone of groupStoneSet[id2]){
+					groupStoneSet[gid].add(stone);
+					groupId[stone.split('_')[0]][stone.split('_')[1]]=gid;
+				}
+				groupStoneSet.delete(id2);
+				for (liberty of groupLibertySet[id2]){
+					groupLibertySet[gid].add(liberty);
+				}
+				groupLibertySet.delete(id2);
+			}
+	}
+}
+
+function subtractLiberty(x,y,vertex) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
+		return;
+	switch(getVertex(x,y)){
+		case '.':
+		case 'E':
+			return;
+	}
+	gid=groupId[x][y];
+	groupLibertySet[gid].delete(vertex);
+	if((getVertex(x,y)!==playerToMove)&&(getVertexLibertyAmount(x, y)==0)){
+		if (groupStoneSet[gid].size == 1) {
+			koX = x;
+			koY = y;
+		}
+		for (stone of groupStoneSet[gid]){
+			setVertex(stone.split('_')[0],stone.split('_')[1],'.');
+			removeSvgStone(stone.split('_')[0],stone.split('_')[1]);
+		}
+		for (stone of groupStoneSet[gid]){
+			addLiberty(stone.split('_')[0],stone.split('_')[1]);
+			groupId[stone.split('_')[0]][stone.split('_')[1]]='';
+		}
+		groupLibertySet.delete(gid);
+		groupStoneSet.delete(gid);
+	}
+}
+
+function removeSvgStone(x,y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	for (e of svgBoard.querySelectorAll('.vertex'+x+'_'+y)){
+		e.parentElement.removeChild(e);
+		//TODO consider removing a single stone rather than the whole group
+	}
+}
+
+function drawSvgStoneWithEffects(x,y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
+		return;
+	removeSvgStone(x,y);
+	if (getVertex(x, y) != '.') {
+		newStone = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+		newStone.setAttribute('cx', x);
+		newStone.setAttribute('cy', y);
+		newStone.setAttribute('r', 0.5);
+		targetClass='vertex'+x+'_'+y;
+		switch (getVertex(x, y)) {
+			case 'X':
+				newStone.setAttribute('class', targetClass+' player1');
+				break;
+			case 'O':
+				newStone.setAttribute('class', targetClass+' player2');
+		}
+		svgBoardStones.appendChild(newStone);
+	}
+	drawHorizontalRectEffect(x-1,y);
+	drawHorizontalRectEffect(x,y);
+	drawVerticalRectEffect(x,y-1);
+	drawVerticalRectEffect(x,y);
+	//TODO remove duplicates
+	drawCompare3Effect(x-1,y);
+	drawCompare3Effect(x,y);
+	drawCompare3Effect(x-1,y-1);
+	drawCompare3Effect(x,y-1);
+}
+
+function addLiberty(x,y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
+		return;
+	addLiberty2(1+x, y,x+'_'+y);
+	addLiberty2(-1+x, y,x+'_'+y);
+	addLiberty2(x, 1+y,x+'_'+y);
+	addLiberty2(x, -1+y,x+'_'+y);
+}
+
+function addLiberty2(x,y,vertex) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
+		return;
+	switch(getVertex(x,y)){
+		case '.':
+		case 'E':
+			return;
+	}
+	//console.log('addLiberty2',x,y);
+	groupLibertySet[groupId[x][y]].add(vertex);
+}
+
+var playerToMove = 'X';
+var koX = koY = -1;
+
+function switchPlayer() {
+	switch (playerToMove) {
+		case 'X':
+			playerToMove = 'O';
+			svgBoardNextMove.setAttribute('class', 'player2');
+			playerIndicator.innerHTML='2';
+			break;
+		case 'O':
+			playerToMove = 'X';
+			svgBoardNextMove.setAttribute('class', 'player1');
+			playerIndicator.innerHTML='1';
+			break;
+	}
+	svgBoardNextMove.setAttribute('cy', -3);
+}
+
+function isIllegalMove(x, y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if (x == koX && y == koY) {
+		return true;
+	}
+	if (getVertex(x, y) != '.') {
+		return true;
+	}
+	if (opponentCaptureableOrAllySafe(x + 1, y) ||
+		opponentCaptureableOrAllySafe(x - 1, y) ||
+		opponentCaptureableOrAllySafe(x, y + 1) ||
+		opponentCaptureableOrAllySafe(x, y - 1)) {
+		return false;
+	}
+	return true;
+}
+
+function opponentCaptureableOrAllySafe(x, y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	switch (getVertex(x, y)) {
+		case '.':
+			return true;
+		case 'E':
+			break;
+		case playerToMove:
+			if (getVertexLibertyAmount(x, y) > 1) {
+				return true;
+			}
+			break;
+		default: //opponent
+			if (getVertexLibertyAmount(x, y) == 1) {
+				return true;
+			}
+	}
+	return false;
+}
+
+function getVertex(x, y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if ((typeof y === 'undefined')||(typeof x === 'undefined'))
+		return 'E';
+	if (0 <= x && x < gridColumns && 0 <= y && y < gridRows) {
+		return boardText[y][x];
+	}
+	return 'E'; //TODO torus, cylinder
+}
+
+function setVertex(x, y, char) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	//console.log('setVertex', x, y, char);
+	if (0 <= x && x < gridColumns && 0 <= y && y < gridRows) {
+		boardText[y][x] = char;
+	}
+	//TODO torus, cylinder
+}
+
+function getVertexLibertyAmount(x, y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	//for convenience, empty vertices will also have liberties.
+	if (0 <= x && x < gridColumns && 0 <= y && y < gridRows) {
+		if (getVertex(x, y)!='.') {
+			return groupLibertySet[groupId[x][y]].size;
+		}
+	}
+	//TODO torus, cylinder
+	return -1;
+}
+
+boardText = '...\n...\n...'.split('\n');
+
+function initBoardWithText(boardTextTemp) {
+	//Input of GNU Go style expected (also used by Leela Zero)
+	boardTextTemp = boardTextTemp.split('+').join('.');
+	index = 0;
+	while (index < boardTextTemp.length) {
+		switch (boardTextTemp[index]) {
+			case '.':
+			case 'X':
+			case 'O':
+			case '\n':
+				index++;
+				break;
+			default:
+				boardTextTemp = boardTextTemp.substring(0, index) + boardTextTemp.substring(index + 1);
+		}
+	}
+	boardTextTemp = boardTextTemp.trim().split('\n');
+	maxRowLength = 0;
+	for (row of boardTextTemp){
+		maxRowLength=Math.max(maxRowLength,row.length);
+	}
+	if (maxRowLength==0)
+		return;
+	boardText = [];
+	goodRows = 0;
+	for (row of boardTextTemp){
+		if(maxRowLength==row.length) {
+			boardText[goodRows] = row.split('');
+			goodRows++;
+		}
+	}
+	if (gridRows != goodRows || gridColumns != maxRowLength) {
+		gridRows = goodRows;
+		gridColumns = maxRowLength;
+		console.log('Detected board size change', gridRows, gridColumns);
+		resizeSvgBoard();
+	}
+	recalculateLiberties();
+	redrawStones();
+	redrawEffects();
+}
+
+function freshBoard() {
+	eastWest = Math.ceil(document.querySelector('input[name="width"][type="number"][min="1"]').value);
+	northSouth = Math.ceil(document.querySelector('input[name="height"][type="number"][min="1"]').value);
+	if (gridRows != northSouth || gridColumns != eastWest) {
+		gridRows = northSouth;
+		gridColumns = eastWest;
+		console.log('Detected board size change', gridRows, gridColumns);
+		resizeSvgBoard();
+	}
+	for (var y = 0; y < gridRows; y++) {
+		boardText[y] = [];
+		for (var x = 0; x < gridColumns; x++) {
+			boardText[y][x] = '.';
+		}
+	}
+	recalculateLiberties();
+	redrawStones();
+	redrawEffects();
+}
+
+var groupId, groupLibertySet, groupStoneSet;
+
+function paintGroupId(x, y, id) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
+		return;
+	switch(getVertex(x, y)){
+		case 'E':
+		case '.':
+			return;
+	}
+	groupId[x][y] = id;
+	//console.log('set',groupId[x][y],x,y,id);
+	groupStoneSet[id].add(x +'_'+ y);
+	if(x + 1<gridColumns){
+		if (getVertex(x + 1, y) === '.')
+			groupLibertySet[id].add((x + 1)+'_'+ y);
+		if (getVertex(x + 1, y) === getVertex(x, y))
+			if(groupId[x + 1][y] !== id) {
+			paintGroupId(x + 1, y, id);
+		}
+	}
+	if(x >0){
+		if (getVertex(x - 1, y) === '.')
+			groupLibertySet[id].add((x - 1)+'_'+ y);
+			if (getVertex(x - 1, y) === getVertex(x, y))
+		if(groupId[x - 1][y] !== id) {
+			paintGroupId(x - 1, y, id);
+		}
+	}
+	if(y + 1<gridRows){
+		if (getVertex(x, y + 1) === '.')
+			groupLibertySet[id].add(x+'_'+ (y+1))
+		if (getVertex(x, y + 1) === getVertex(x, y))
+			if(groupId[x][y + 1] !== id) {
+			paintGroupId(x, y + 1, id);
+		}
+	}
+	if(y >0){
+		if (getVertex(x, y - 1) === '.')
+			groupLibertySet[id].add(x+'_'+ (y-1))
+		if (getVertex(x, y - 1) === getVertex(x, y))
+			if(groupId[x][y - 1] !== id) {
+			paintGroupId(x, y - 1, id);
+		}
+	}
+}
+
+function recalculateLiberties() {
+	//TODO correct method
+	groupId = [];
+	groupLibertySet = new Map();
+	groupStoneSet = new Map();
+	for (var x = 0; x < gridColumns; x++) {
+		groupId[x] = new Array(gridRows);
+		for (var y = 0; y < gridRows; y++) {
+			groupId[x][y] = '';
+		}
+	}
+	for (var x = 0; x < gridColumns; x++) {
+		for (var y = 0; y < gridRows; y++) {
+			if ((getVertex(x, y) != '.') && (groupId[x][y] === '')) {
+				groupStoneSet[x + '_' + y]=new Set();
+				groupLibertySet[x + '_' + y]=new Set();
+				paintGroupId(x, y, x + '_' + y);
+			}
+		}
+	}
+}
+
+function redrawStones() {
+	while (svgBoardStones.lastChild) {
+		svgBoardStones.removeChild(svgBoardStones.lastChild);
+	}
+	for (var x = 0; x < gridColumns; x++) {
+		for (var y = 0; y < gridRows; y++) {
+			drawSvgStone(x,y);
+		}
+	}
+}
+
+function drawSvgStone(x,y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
+		return;
+	if (getVertex(x, y) != '.') {
+		newStone = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+		newStone.setAttribute('cx', x);
+		newStone.setAttribute('cy', y);
+		newStone.setAttribute('r', 0.5);
+		targetClass='vertex'+x+'_'+y;
+		switch (getVertex(x, y)) {
+			case 'X':
+				newStone.setAttribute('class', targetClass+' player1');
+				break;
+			case 'O':
+				newStone.setAttribute('class', targetClass+' player2');
+		}
+		svgBoardStones.appendChild(newStone);
+	}
+}
+
+function drawHorizontalRectEffect(x,y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns-1<=x)||(x<0)||(gridRows<=y)||(y<0))
+		return;
+	if ((getVertex(x, y) != '.') && (getVertex(x + 1, y) != '.')) {
+		newCompare2 = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+		newCompare2.setAttribute('x', x);
+		newCompare2.setAttribute('y', y - 0.5);
+		newCompare2.setAttribute('width', 1);
+		newCompare2.setAttribute('height', 1);
+		targetClass='vertex'+x+'_'+y+' vertex'+(x+1)+'_'+y;
+		if (getVertex(x, y) == getVertex(x + 1, y)) {
+			switch (getVertex(x, y)) {
+				case 'X':
+					newCompare2.setAttribute('class', targetClass+' player1');
+					break;
+				case 'O':
+					newCompare2.setAttribute('class', targetClass+' player2');
+			}
+			same2.appendChild(newCompare2);
+		} else {
+			newCompare2.setAttribute('class', targetClass+' conflict');
+			different2.appendChild(newCompare2);
+		}
+	}
+}
+
+function drawVerticalRectEffect(x,y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns<=x)||(x<0)||(gridRows-1<=y)||(y<0))
+		return;
+	if ((getVertex(x, y) != '.') && (getVertex(x, y + 1) != '.')) {
+		newCompare2 = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+		newCompare2.setAttribute('x', x - 0.5);
+		newCompare2.setAttribute('y', y);
+		newCompare2.setAttribute('width', 1);
+		newCompare2.setAttribute('height', 1);
+		targetClass='vertex'+x+'_'+y+' vertex'+x+'_'+(y+1);
+		if (getVertex(x, y) == getVertex(x, y + 1)) {
+			switch (getVertex(x, y)) {
+				case 'X':
+					newCompare2.setAttribute('class', targetClass+' player1');
+					break;
+				case 'O':
+					newCompare2.setAttribute('class', targetClass+' player2');
+			}
+			same2.appendChild(newCompare2);
+		} else {
+			newCompare2.setAttribute('class', targetClass+' conflict');
+			different2.appendChild(newCompare2);
+		}
+	}
+}
+
+function drawCompare3Effect(x,y) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns-1<=x)||(x<0)||(gridRows-1<=y)||(y<0))
+		return;
+	var compare3 = 'E';
+	var targetClass='';
+	if ((getVertex(x, y) == getVertex(x, y + 1)) && (getVertex(x, y) != '.')) {
+		targetClass='vertex'+x+'_'+y+' vertex'+x+'_'+(y+1);
+		if (getVertex(x, y) == getVertex(x + 1, y + 1)) {
+			targetClass+=' vertex'+(x+1)+'_'+(y+1);
+			compare3 = getVertex(x, y);
+		}
+		if (getVertex(x, y) == getVertex(x + 1, y)) {
+			targetClass+=' vertex'+(x+1)+'_'+y;
+			compare3 = getVertex(x, y);
+		}
+	} else if ((getVertex(x + 1, y) == getVertex(x + 1, y + 1)) && (getVertex(x + 1, y) != '.')) {
+		targetClass='vertex'+(x+1)+'_'+y+' vertex'+(x+1)+'_'+(y+1);
+		if (getVertex(x, y) == getVertex(x + 1, y)) {
+			targetClass+=' vertex'+x+'_'+y;
+			compare3 = getVertex(x + 1, y);
+		}
+		if (getVertex(x, y + 1) == getVertex(x + 1, y)) {
+			targetClass+=' vertex'+x+'_'+(y+1);
+			compare3 = getVertex(x + 1, y);
+		}
+	}
+	if (compare3 != 'E') {
+		//console.log('3star');
+		newCompare3 = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+		newCompare3.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#squareMinus4circles");
+		newCompare3.setAttribute('x', x);
+		newCompare3.setAttribute('y', y);
+		switch (compare3) {
+			case 'X':
+				newCompare3.setAttribute('class', targetClass+' player1');
+				break;
+			case 'O':
+				newCompare3.setAttribute('class', targetClass+' player2');
+		}
+		same3.appendChild(newCompare3);
+	}
+}
+
+function redrawEffects() {
+	different2 = svgBoard.getElementById('different2');
+	same2 = svgBoard.getElementById('same2');
+	same3 = svgBoard.getElementById('same3');
+	while (different2.lastChild) {
+		different2.removeChild(different2.lastChild);
+	}
+	while (same2.lastChild) {
+		same2.removeChild(same2.lastChild);
+	}
+	while (same3.lastChild) {
+		same3.removeChild(same3.lastChild);
+	}
+	for (var x = 0; x < gridColumns - 1; x++) {
+		for (var y = 0; y < gridRows; y++) {
+			drawHorizontalRectEffect(x,y);
+		}
+	}
+	for (var x = 0; x < gridColumns; x++) {
+		for (var y = 0; y < gridRows - 1; y++) {
+			drawVerticalRectEffect(x,y);
+		}
+	}
+	for (var x = 0; x < gridColumns - 1; x++) {
+		for (var y = 0; y < gridRows - 1; y++) {
+			drawCompare3Effect(x,y);
+		}
+	}
+}
+
+function resizeSvgBoard() {
+	svgBoard.viewBox.baseVal.width = gridColumns+2*boardMarginWidth;
+	svgBoard.viewBox.baseVal.height = gridRows+2*boardMarginWidth;
+	svgBoardMargin.setAttribute('width', gridColumns+2*boardMarginWidth);
+	svgBoardMargin.setAttribute('height', gridRows+2*boardMarginWidth);
+	svgBoardBoard.setAttribute('width', gridColumns);
+	svgBoardBoard.setAttribute('height', gridRows);
+	while (svgBoardGrid.lastChild) {
+		svgBoardGrid.removeChild(svgBoardGrid.lastChild);
+	}
+	for (var x = 0; x < gridColumns; x++) {
+		line = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+		line.setAttribute('x', x - gridLineWidth / 2);
+		line.setAttribute('y', -gridLineWidth / 2);
+		line.setAttribute('width', gridLineWidth);
+		line.setAttribute('height', gridRows - 1 + gridLineWidth);
+		line.setAttribute('class', 'grid');
+		svgBoardGrid.appendChild(line);
+	}
+	for (var y = 0; y < gridRows; y++) {
+		line = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+		line.setAttribute('x', -gridLineWidth / 2);
+		line.setAttribute('y', y - gridLineWidth / 2);
+		line.setAttribute('width', gridColumns - 1 + gridLineWidth);
+		line.setAttribute('height', gridLineWidth);
+		line.setAttribute('class', 'grid');
+		svgBoardGrid.appendChild(line);
+	}
+}
+
+exampleText=`
+  9 . . . . . . X X . 9
+  8 . . . . O O O X . 8
+  7 . . + O O X X . . 7
+  6 . . O . X . X . . 6
+  5 . . . O X X . . . 5
+  4 . . . . O X . . . 4
+  3 . . O . O(X)X . . 3
+  2 . . . O X X . . . 2
+  1 . . . O O X . . . 1
+`;
+/**/
+initBoardWithText(exampleText);
+		</script>
+	</body>
+</html>
