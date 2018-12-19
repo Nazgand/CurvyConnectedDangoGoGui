@@ -48,30 +48,32 @@
 		<button type="button" onclick="freshBoard();">Fresh board</button>
 		<br/>
 		<button type="button" onclick="initBoardWithText(document.querySelector('textarea[name=\'importPosition\']').value);">Import position</button>
+		<button type="button" onclick="exportPosition();">Export position</button>
 		<br/>
 		<textarea name="importPosition" rows="30" cols="80">
 GNU Go and Leela Zero terminal board positions accepted!
 The only characters that will be parsed are: '.', '+', 'O', 'X', '\n'!
-. . . . . . . . . . . . . X . . . . 19
- 18 . . O . . . . . . . . O O O O X . . . 18
- 17 . . O X X . O . O . . O X X X . X X . 17
- 16 . . . O . X . . . O O X . X . X O O . 16
- 15 . . . . . . . . X X X . X . X O O . . 15
- 14 . . O O . X . . . . .(O). O . O X X . 14
- 13 . O . . O . . . . . . O . . . . . . . 13
- 12 . X X . . . . . . O . . . . O . X . . 12
- 11 . . . . . . . . . . . . . . O X . . . 11
- 10 . . . X . . . . . + . . . . O X . . . 10
-  9 . . . . . . X . . O . O . . . X . . .  9
-...X.........O.....
-  7 X X X . . . . . . . X . X . . X . . .  7
-  6 X O O O . . . O . . O X . . . . . . .  6
-  5 O O . . . . O . . . O X . . . X . . .  5
-  4 . . O O . X . . . + O . X . . + . . .  4
-  3 . . O X X . . O . . . O X . . X . . .  3
-  2 . . O . . . X . . . . O X X . . . . .  2
-  1 . . . . . . . . . . . O O X . . . . .  1
-    A B C D E F G H J K L M N \O/ P Q R S T
+    A B C D E F G H J K L M N O P Q R S T        Last move: Black H16
+ 19 . . O X X . X O O . . . O O X . . . . 19
+ 18 . . O O X . X O . O . O O X . . X . X 18
+ 17 . O . O O X X X O . O O X X . . X X O 17
+ 16 O O . O X . X(X)O X O X O . X + X O O 16
+ 15 O X O O X X X O O X O X X . . X O O . 15
+ 14 X X X X X X O O O O O O X X . O X O . 14
+ 13 X X . . X . X O X X X O O O X . X O . 13
+ 12 X O O O O X X O O X X X O X . X X O . 12
+ 11 X X X O X X O O X X O O O X X X O . . 11
+ 10 O O X X . X O X X X O X X X O O O . . 10
+  9 . O X . . X X X X O X X X O O O . . .  9
+  8 . O O X X O O O O O X X O X X X O . .  8
+  7 . . O X X X X X O O O O O O X O O O .  7
+  6 O . O O O X O X O . . O X X X X O . O  6
+  5 X O . . O O O O O O . O O O X . X O O  5
+  4 X X O O O O . X . X O X X O X + X X X  4
+  3 . X X X X X O X . . O X . X X . X . .  3
+  2 . . . X X O O O O . O X . X O X . X .  2
+  1 . X X O O O . . . . O O X . . . X . .  1
+    A B C D E F G H J K L M N O P Q R S T
 The lines that have less valid characters than the line with the most valid characters will be culled. The northwest corner of the board is missing in this example.
 		</textarea>
 
@@ -417,6 +419,14 @@ function initBoardWithText(boardTextTemp) {
 	recalculateLiberties();
 	redrawStones();
 	redrawEffects();
+}
+
+function exportPosition() {
+	stringBoard = '';
+	for (row of boardText) {
+		stringBoard += row.join('') + '\n';
+	}
+	document.querySelector('textarea[name=\'importPosition\']').value = stringBoard;
 }
 
 function freshBoard() {
