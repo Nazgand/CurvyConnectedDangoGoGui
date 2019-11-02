@@ -17,8 +17,9 @@
 			<option value="singleClickToMove">Single-click to place stones.</option>
 			<option value="doubleClickToMove">Double-click to place stones.</option>
 		</select>
-		<button type="button" onclick="switchPlayer();">Pass</button>
+		<button type="button" onclick="pass();">Pass</button>
 		<text>[Player <text id="playerIndicator">1</text> to move.]</text>
+		<!-- <text>[Goto move <input type="number" id="move" name="move" min="0" max="0" value="0" onchange="undo();">]</text> -->
 		<svg id="svgBoard" viewBox="-0.6 -0.6 3.2 3.2" xmlns="http://www.w3.org/2000/svg">
 			<defs>
 				<mask id="4circles">
@@ -40,11 +41,17 @@
 			<g id="same2"/>
 			<g id="stones"/>
 			<circle class="player1" id="nextMove" cx="-2" cy="-2" r="0.45" fill-opacity="0.5" stroke="#7f7f7f" stroke-width="0.1"/>
+		<hr/>
+		<select name="capturemode" onchange="captureMode=this.value;">
+			<option value="removeStones">Capture removes stones.</option>
+			<option value="flipStones">Capture flips stones.</option>
+		</select>
+		<hr/>
 		</svg>
 		EastWest:
-		<input name="width" type="number" min="1" value="9"/>
+		<input id="width" name="width" type="number" min="1" value="9"/>
 		NorthSouth:
-		<input name="height" type="number" min="1" value="9"/>
+		<input id="height" name="height" type="number" min="1" value="9"/>
 		<button type="button" onclick="freshBoard();">Fresh board</button>
 		<br/>
 		<button type="button" onclick="initBoardWithText(document.querySelector('textarea[name=\'importPosition\']').value);">Import position</button>
@@ -96,13 +103,17 @@ var svgBoardGrid = svgBoard.getElementById('grid');
 var svgBoardStones = svgBoard.getElementById('stones');
 var svgBoardNextMove = svgBoard.getElementById('nextMove');
 
+var numberMove = document.getElementById('move');
+var numberWidth = document.getElementById('width');
+var numberHeight = document.getElementById('height');
+
 var mouseMode = 'singleClickToMove';
 svgBoard.onmousemove = function(e) {
 	gridX = Math.min(gridColumns, Math.max(0, Math.round(-0.5 +
 		gridColumns * (e.clientX - svgBoard.getBoundingClientRect().x) / svgBoard.clientWidth)));
 	gridY = Math.min(gridRows, Math.max(0, Math.round(-0.5 +
 		gridRows * (e.clientY - svgBoard.getBoundingClientRect().y) / svgBoard.clientHeight)));
-	if (isIllegalMove(gridX, gridY)) {
+	if (isIllegalMove(boardStates[stateIndex], gridX, gridY)) {
 		gridX = gridY = -2;
 	}
 	svgBoardNextMove.setAttribute('cx', gridX);
@@ -119,7 +130,7 @@ svgBoard.ondblclick = function(e) {
 		gridRows * (e.clientY - svgBoard.getBoundingClientRect().y) / svgBoard.clientHeight)));
 	switch (mouseMode) {
 		case 'doubleClickToMove':
-			playMove(gridX,gridY);
+			guiPlayMove(gridX,gridY);
 	}
 }
 svgBoard.onclick = function(e) {
@@ -129,93 +140,161 @@ svgBoard.onclick = function(e) {
 		gridRows * (e.clientY - svgBoard.getBoundingClientRect().y) / svgBoard.clientHeight)));
 	switch (mouseMode) {
 		case 'singleClickToMove':
-			playMove(gridX,gridY);
+			guiPlayMove(gridX,gridY);
 	}
 }
 
-function playMove(x,y) {
+function guiPlayMove(x,y) {
 	x=Math.floor(x);
 	y=Math.floor(y);
-	if (!isIllegalMove(x, y)) {
-		koY=-1;
-		setVertex(x, y, playerToMove);
-		drawSvgStoneWithEffects(x,y)
-		vertex=x+'_'+y;
-		groupStoneSet[vertex]=new Set([vertex]);
-		groupLibertySet[vertex]=new Set();
-		if (getVertex(x + 1, y) === '.')
-			groupLibertySet[vertex].add((x + 1)+'_'+ y);
-		if (getVertex(x - 1, y) === '.')
-			groupLibertySet[vertex].add((x - 1)+'_'+ y);
-		if (getVertex(x, y + 1) === '.')
-			groupLibertySet[vertex].add(x+'_'+ (y+1))
-		if (getVertex(x, y - 1) === '.')
-			groupLibertySet[vertex].add(x+'_'+ (y-1))
-		groupId[x][y]=vertex;
-		mergeGroups(x+1, y,vertex);
-		mergeGroups(x-1, y,vertex);
-		mergeGroups(x, y+1,vertex);
-		mergeGroups(x, y-1,vertex);
-		subtractLiberty(x+1, y,vertex);
-		subtractLiberty(x-1, y,vertex);
-		subtractLiberty(x, y+1,vertex);
-		subtractLiberty(x, y-1,vertex);
-		switchPlayer();
+	if (!isIllegalMove(boardStates[stateIndex], x, y)) {
+		boardStates = boardStates.slice(0, stateIndex+1);
+		boardStates.push(JSON.parse(JSON.stringify(boardStates[stateIndex])));
+		stateIndex++;
+		/*numberMove.setAttribute('max', stateIndex);
+		numberMove.value = stateIndex;*/
+		recalculateLiberties(boardStates[stateIndex]);
+		playMove(boardStates[stateIndex], x, y, true);
+		initLegalMoves(boardStates[stateIndex]);
+		switch (boardStates[stateIndex].playerToMove) {
+			case 'X':
+				svgBoardNextMove.setAttribute('class', 'player1');
+				playerIndicator.innerHTML='1';
+				break;
+			case 'O':
+				svgBoardNextMove.setAttribute('class', 'player2');
+				playerIndicator.innerHTML='2';
+				break;
+		}
+		svgBoardNextMove.setAttribute('cy', -3);
+	} else {
+		console.log('Illegal move.');
 	}
 }
 
-function mergeGroups(x,y,id2) {
+function playMove(state, x, y, updateGui) {
 	x=Math.floor(x);
 	y=Math.floor(y);
-	switch(getVertex(x,y)){
+	state.koY=-1;
+	setVertex(state, x, y, state.playerToMove);
+	if (updateGui) {
+		drawSvgStoneWithEffects(x,y);
+	}
+	vertex=x+'_'+y;
+	state.groupStoneSet[vertex]=new Set([vertex]);
+	state.groupLibertySet[vertex]=new Set();
+	if (getVertex(state, x + 1, y) === '.')
+		state.groupLibertySet[vertex].add((x + 1)+'_'+ y);
+	if (getVertex(state, x - 1, y) === '.')
+		state.groupLibertySet[vertex].add((x - 1)+'_'+ y);
+	if (getVertex(state, x, y + 1) === '.')
+		state.groupLibertySet[vertex].add(x+'_'+ (y+1))
+	if (getVertex(state, x, y - 1) === '.')
+		state.groupLibertySet[vertex].add(x+'_'+ (y-1))
+	state.groupId[x][y]=vertex;
+	mergeGroups(state, x+1, y,vertex);
+	mergeGroups(state, x-1, y,vertex);
+	mergeGroups(state, x, y+1,vertex);
+	mergeGroups(state, x, y-1,vertex);
+	subtractLiberty(state, x+1, y, vertex, updateGui);
+	subtractLiberty(state, x-1, y, vertex, updateGui);
+	subtractLiberty(state, x, y+1, vertex, updateGui);
+	subtractLiberty(state, x, y-1, vertex, updateGui);
+	switchPlayer(state);
+}
+
+function pass() {
+	boardStates = boardStates.slice(0, stateIndex+1);
+	boardStates.push(JSON.parse(JSON.stringify(boardStates[stateIndex])));
+	stateIndex++;
+	/*numberMove.setAttribute('max', stateIndex);
+	numberMove.value = stateIndex;*/
+	recalculateLiberties(boardStates[stateIndex]);
+	boardStates[stateIndex].koY=-1;
+	switchPlayer(boardStates[stateIndex]);
+	switch (boardStates[stateIndex].playerToMove) {
+		case 'X':
+			svgBoardNextMove.setAttribute('class', 'player1');
+			playerIndicator.innerHTML='1';
+			break;
+		case 'O':
+			svgBoardNextMove.setAttribute('class', 'player2');
+			playerIndicator.innerHTML='2';
+			break;
+	}
+	svgBoardNextMove.setAttribute('cy', -3);
+}
+
+function mergeGroups(state,x,y,id2) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	switch(getVertex(state,x,y)){
 		case '.':
 		case 'E':
 			return;
-		case getVertex(id2.split('_')[0],id2.split('_')[1]):
-			gid=groupId[x][y];
-			id2=groupId[id2.split('_')[0]][id2.split('_')[1]];
+		case getVertex(state,id2.split('_')[0],id2.split('_')[1]):
+			gid=state.groupId[x][y];
+			id2=state.groupId[id2.split('_')[0]][id2.split('_')[1]];
 			if(gid!==id2){
 				//TODO:make canonical
-				for (stone of groupStoneSet[id2]){
-					groupStoneSet[gid].add(stone);
-					groupId[stone.split('_')[0]][stone.split('_')[1]]=gid;
+				for (stone of state.groupStoneSet[id2]){
+					state.groupStoneSet[gid].add(stone);
+					state.groupId[stone.split('_')[0]][stone.split('_')[1]]=gid;
 				}
-				groupStoneSet.delete(id2);
-				for (liberty of groupLibertySet[id2]){
-					groupLibertySet[gid].add(liberty);
+				state.groupStoneSet.delete(id2);
+				for (liberty of state.groupLibertySet[id2]){
+					state.groupLibertySet[gid].add(liberty);
 				}
-				groupLibertySet.delete(id2);
+				state.groupLibertySet.delete(id2);
 			}
 	}
 }
 
-function subtractLiberty(x,y,vertex) {
+var captureMode = 'removeStones';
+
+function subtractLiberty(state, x, y, vertex, updateGui) {
 	x=Math.floor(x);
 	y=Math.floor(y);
 	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
 		return;
-	switch(getVertex(x,y)){
+	switch(getVertex(state, x, y)){
 		case '.':
 		case 'E':
 			return;
 	}
-	gid=groupId[x][y];
-	groupLibertySet[gid].delete(vertex);
-	if((getVertex(x,y)!==playerToMove)&&(getVertexLibertyAmount(x, y)==0)){
-		if (groupStoneSet[gid].size == 1) {
-			koX = x;
-			koY = y;
+	gid=state.groupId[x][y];
+	state.groupLibertySet[gid].delete(vertex);
+	//if captured
+	if((getVertex(state, x, y)!==state.playerToMove)&&(getVertexLibertyAmount(state, x, y)==0)){
+		if (state.groupStoneSet[gid].size == 1) {
+			state.koX = x;
+			state.koY = y;
 		}
-		for (stone of groupStoneSet[gid]){
-			setVertex(stone.split('_')[0],stone.split('_')[1],'.');
-			removeSvgStone(stone.split('_')[0],stone.split('_')[1]);
+		switch (captureMode) {
+			case 'removeStones':
+				for (stone of state.groupStoneSet[gid]){
+					setVertex(state, stone.split('_')[0],stone.split('_')[1],'.');
+					if (updateGui) {
+						removeSvgStone(stone.split('_')[0],stone.split('_')[1]);
+					}
+				}
+				for (stone of state.groupStoneSet[gid]){
+					addLiberty(state, stone.split('_')[0],stone.split('_')[1]);
+					state.groupId[stone.split('_')[0]][stone.split('_')[1]]='';
+				}
+				state.groupLibertySet.delete(gid);
+				state.groupStoneSet.delete(gid);
+				break;
+			case 'flipStones':
+				for (stone of state.groupStoneSet[gid]){
+					color = getVertex(state, stone.split('_')[0],stone.split('_')[1]);
+					setVertex(state, stone.split('_')[0],stone.split('_')[1], switchPlayer2(color));
+					if (updateGui) {
+						redrawStones();
+						redrawEffects();
+					}
+				}
 		}
-		for (stone of groupStoneSet[gid]){
-			addLiberty(stone.split('_')[0],stone.split('_')[1]);
-			groupId[stone.split('_')[0]][stone.split('_')[1]]='';
-		}
-		groupLibertySet.delete(gid);
-		groupStoneSet.delete(gid);
 	}
 }
 
@@ -234,13 +313,13 @@ function drawSvgStoneWithEffects(x,y) {
 	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
 		return;
 	removeSvgStone(x,y);
-	if (getVertex(x, y) != '.') {
+	if (getCurVertex(x, y) != '.') {
 		newStone = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
 		newStone.setAttribute('cx', x);
 		newStone.setAttribute('cy', y);
 		newStone.setAttribute('r', 0.5);
 		targetClass='vertex'+x+'_'+y;
-		switch (getVertex(x, y)) {
+		switch (getCurVertex(x, y)) {
 			case 'X':
 				newStone.setAttribute('class', targetClass+' player1');
 				break;
@@ -260,126 +339,120 @@ function drawSvgStoneWithEffects(x,y) {
 	drawCompare3Effect(x,y-1);
 }
 
-function addLiberty(x,y) {
+function addLiberty(state, x, y) {
 	x=Math.floor(x);
 	y=Math.floor(y);
 	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
 		return;
-	addLiberty2(1+x, y,x+'_'+y);
-	addLiberty2(-1+x, y,x+'_'+y);
-	addLiberty2(x, 1+y,x+'_'+y);
-	addLiberty2(x, -1+y,x+'_'+y);
+	addLiberty2(state, 1+x, y,x+'_'+y);
+	addLiberty2(state, -1+x, y,x+'_'+y);
+	addLiberty2(state, x, 1+y,x+'_'+y);
+	addLiberty2(state, x, -1+y,x+'_'+y);
 }
 
-function addLiberty2(x,y,vertex) {
+function addLiberty2(state, x, y, vertex) {
 	x=Math.floor(x);
 	y=Math.floor(y);
 	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
 		return;
-	switch(getVertex(x,y)){
+	switch(getVertex(state, x, y)){
 		case '.':
 		case 'E':
 			return;
 	}
 	//console.log('addLiberty2',x,y);
-	groupLibertySet[groupId[x][y]].add(vertex);
+	state.groupLibertySet[state.groupId[x][y]].add(vertex);
 }
 
-var playerToMove = 'X';
-var koX = koY = -1;
+function switchPlayer(state) {
+	state.playerToMove = switchPlayer2(state.playerToMove);
+}
 
-function switchPlayer() {
-	switch (playerToMove) {
+function switchPlayer2(s) {
+	switch (s) {
 		case 'X':
-			playerToMove = 'O';
-			svgBoardNextMove.setAttribute('class', 'player2');
-			playerIndicator.innerHTML='2';
-			break;
+			return 'O';
 		case 'O':
-			playerToMove = 'X';
-			svgBoardNextMove.setAttribute('class', 'player1');
-			playerIndicator.innerHTML='1';
-			break;
+			return 'X';
 	}
-	svgBoardNextMove.setAttribute('cy', -3);
+	return 'E';
 }
 
-function isIllegalMove(x, y) {
+function isIllegalMove(state, x, y) {
 	x=Math.floor(x);
 	y=Math.floor(y);
-	if (x == koX && y == koY) {
-		return true;
-	}
-	if (getVertex(x, y) != '.') {
-		return true;
-	}
-	if (opponentCaptureableOrAllySafe(x + 1, y) ||
-		opponentCaptureableOrAllySafe(x - 1, y) ||
-		opponentCaptureableOrAllySafe(x, y + 1) ||
-		opponentCaptureableOrAllySafe(x, y - 1)) {
-		return false;
-	}
-	return true;
-}
-
-function opponentCaptureableOrAllySafe(x, y) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	switch (getVertex(x, y)) {
-		case '.':
+	switch (state.legalMove[y][x]) {
+		case 'i':
 			return true;
-		case 'E':
-			break;
-		case playerToMove:
-			if (getVertexLibertyAmount(x, y) > 1) {
-				return true;
-			}
-			break;
-		default: //opponent
-			if (getVertexLibertyAmount(x, y) == 1) {
-				return true;
-			}
+		case 'l':
+			return false;
+	}
+	if (x == state.koX && y == state.koY) {
+		state.legalMove[y][x] = 'i';
+		return true;
+	}
+	if (getVertex(state, x, y) != '.') {
+		state.legalMove[y][x] = 'i';
+		return true;
+	}
+	//Simulate move
+	simState = JSON.parse(JSON.stringify(state));
+	recalculateLiberties(simState);
+	playMove(simState, x, y, false);
+	recalculateLiberties(simState);
+	if (getVertexLibertyAmount(simState, x, y) === 0) {
+		return true;
 	}
 	return false;
 }
 
-function getVertex(x, y) {
+function getVertex(state, x, y) {
 	x=Math.floor(x);
 	y=Math.floor(y);
 	if ((typeof y === 'undefined')||(typeof x === 'undefined'))
 		return 'E';
 	if (0 <= x && x < gridColumns && 0 <= y && y < gridRows) {
-		return boardText[y][x];
+		return state.boardText[y][x];
 	}
 	return 'E'; //TODO torus, cylinder
 }
 
-function setVertex(x, y, char) {
+function setVertex(state, x, y, char) {
 	x=Math.floor(x);
 	y=Math.floor(y);
 	//console.log('setVertex', x, y, char);
 	if (0 <= x && x < gridColumns && 0 <= y && y < gridRows) {
-		boardText[y][x] = char;
+		state.boardText[y][x] = char;
 	}
 	//TODO torus, cylinder
 }
 
-function getVertexLibertyAmount(x, y) {
+function getVertexLibertyAmount(state, x, y) {
 	x=Math.floor(x);
 	y=Math.floor(y);
 	//for convenience, empty vertices will also have liberties.
 	if (0 <= x && x < gridColumns && 0 <= y && y < gridRows) {
-		if (getVertex(x, y)!='.') {
-			return groupLibertySet[groupId[x][y]].size;
+		if (getVertex(state, x, y)!='.') {
+			return state.groupLibertySet[state.groupId[x][y]].size;
 		}
 	}
 	//TODO torus, cylinder
 	return -1;
 }
 
-boardText = '...\n...\n...'.split('\n');
+var boardStates = [];
+var stateIndex = -1;
+
+function undo() {
+	stateIndex = numberMove.value;
+	redrawStones();
+	redrawEffects();
+}
 
 function initBoardWithText(boardTextTemp) {
+	boardStates = [{boardText:[], legalMove:[], groupId:[], koY:-1, koX:-1,
+			groupLibertySet:new Map(), groupStoneSet:new Map()}];
+	stateIndex = 0;
 	//Input of GNU Go style expected (also used by Leela Zero)
 	boardTextTemp = boardTextTemp.split('+').join('.');
 	index = 0;
@@ -402,11 +475,10 @@ function initBoardWithText(boardTextTemp) {
 	}
 	if (maxRowLength==0)
 		return;
-	boardText = [];
 	goodRows = 0;
 	for (row of boardTextTemp){
 		if(maxRowLength==row.length) {
-			boardText[goodRows] = row.split('');
+			boardStates[0].boardText[goodRows] = row.split('');
 			goodRows++;
 		}
 	}
@@ -416,22 +488,26 @@ function initBoardWithText(boardTextTemp) {
 		console.log('Detected board size change', gridRows, gridColumns);
 		resizeSvgBoard();
 	}
-	recalculateLiberties();
+	boardStates[0].playerToMove = 'X';
+	initLegalMoves(boardStates[0]);
+	recalculateLiberties(boardStates[0]);
 	redrawStones();
 	redrawEffects();
 }
 
 function exportPosition() {
 	stringBoard = '';
-	for (row of boardText) {
+	for (row of boardStates[stateIndex].boardText) {
 		stringBoard += row.join('') + '\n';
 	}
 	document.querySelector('textarea[name=\'importPosition\']').value = stringBoard;
 }
 
 function freshBoard() {
-	eastWest = Math.ceil(document.querySelector('input[name="width"][type="number"][min="1"]').value);
-	northSouth = Math.ceil(document.querySelector('input[name="height"][type="number"][min="1"]').value);
+	boardStates = [{boardText:[], legalMove:[], koY:-1, koX:-1}];
+	stateIndex = 0;
+	eastWest = Math.ceil(numberWidth.value);
+	northSouth = Math.ceil(numberHeight.value);
 	if (gridRows != northSouth || gridColumns != eastWest) {
 		gridRows = northSouth;
 		gridColumns = eastWest;
@@ -439,82 +515,91 @@ function freshBoard() {
 		resizeSvgBoard();
 	}
 	for (var y = 0; y < gridRows; y++) {
-		boardText[y] = [];
+		boardStates[0].boardText[y] = [];
 		for (var x = 0; x < gridColumns; x++) {
-			boardText[y][x] = '.';
+			boardStates[0].boardText[y][x] = '.';
 		}
 	}
-	recalculateLiberties();
+	boardStates[0].playerToMove = 'X';
+	initLegalMoves(boardStates[0]);
+	recalculateLiberties(boardStates[0]);
 	redrawStones();
 	redrawEffects();
 }
 
-var groupId, groupLibertySet, groupStoneSet;
-
-function paintGroupId(x, y, id) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
-		return;
-	switch(getVertex(x, y)){
-		case 'E':
-		case '.':
-			return;
-	}
-	groupId[x][y] = id;
-	//console.log('set',groupId[x][y],x,y,id);
-	groupStoneSet[id].add(x +'_'+ y);
-	if(x + 1<gridColumns){
-		if (getVertex(x + 1, y) === '.')
-			groupLibertySet[id].add((x + 1)+'_'+ y);
-		if (getVertex(x + 1, y) === getVertex(x, y))
-			if(groupId[x + 1][y] !== id) {
-			paintGroupId(x + 1, y, id);
-		}
-	}
-	if(x >0){
-		if (getVertex(x - 1, y) === '.')
-			groupLibertySet[id].add((x - 1)+'_'+ y);
-			if (getVertex(x - 1, y) === getVertex(x, y))
-		if(groupId[x - 1][y] !== id) {
-			paintGroupId(x - 1, y, id);
-		}
-	}
-	if(y + 1<gridRows){
-		if (getVertex(x, y + 1) === '.')
-			groupLibertySet[id].add(x+'_'+ (y+1))
-		if (getVertex(x, y + 1) === getVertex(x, y))
-			if(groupId[x][y + 1] !== id) {
-			paintGroupId(x, y + 1, id);
-		}
-	}
-	if(y >0){
-		if (getVertex(x, y - 1) === '.')
-			groupLibertySet[id].add(x+'_'+ (y-1))
-		if (getVertex(x, y - 1) === getVertex(x, y))
-			if(groupId[x][y - 1] !== id) {
-			paintGroupId(x, y - 1, id);
+function initLegalMoves(state) {
+	for (var y = 0; y < gridRows; y++) {
+		state.legalMove[y] = [];
+		for (var x = 0; x < gridColumns; x++) {
+			state.legalMove[y][x] = '?';
 		}
 	}
 }
 
-function recalculateLiberties() {
+function paintGroupId(state, x, y, id) {
+	x=Math.floor(x);
+	y=Math.floor(y);
+	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
+		return;
+	switch(getVertex(state, x, y)){
+		case 'E':
+		case '.':
+			return;
+	}
+	state.groupId[x][y] = id;
+	//console.log('set',groupId[x][y],x,y,id);
+	state.groupStoneSet[id].add(x +'_'+ y);
+	if(x + 1 < gridColumns){
+		if (getVertex(state, x + 1, y) === '.')
+			state.groupLibertySet[id].add((x + 1)+'_'+ y);
+		if (getVertex(state, x + 1, y) === getVertex(state, x, y))
+			if(state.groupId[x + 1][y] !== id) {
+			paintGroupId(state, x + 1, y, id);
+		}
+	}
+	if(x > 0){
+		if (getVertex(state, x - 1, y) === '.')
+			state.groupLibertySet[id].add((x - 1)+'_'+ y);
+			if (getVertex(state, x - 1, y) === getVertex(state, x, y))
+		if(state.groupId[x - 1][y] !== id) {
+			paintGroupId(state, x - 1, y, id);
+		}
+	}
+	if(y + 1 < gridRows){
+		if (getVertex(state, x, y + 1) === '.')
+			state.groupLibertySet[id].add(x+'_'+ (y+1))
+		if (getVertex(state, x, y + 1) === getVertex(state, x, y))
+			if(state.groupId[x][y + 1] !== id) {
+			paintGroupId(state, x, y + 1, id);
+		}
+	}
+	if(y > 0){
+		if (getVertex(state, x, y - 1) === '.')
+			state.groupLibertySet[id].add(x+'_'+ (y-1))
+		if (getVertex(state, x, y - 1) === getVertex(state, x, y))
+			if(state.groupId[x][y - 1] !== id) {
+			paintGroupId(state, x, y - 1, id);
+		}
+	}
+}
+
+function recalculateLiberties(state) {
 	//TODO correct method
-	groupId = [];
-	groupLibertySet = new Map();
-	groupStoneSet = new Map();
+	state.groupId = [];
+	state.groupLibertySet = new Map();
+	state.groupStoneSet = new Map();
 	for (var x = 0; x < gridColumns; x++) {
-		groupId[x] = new Array(gridRows);
+		state.groupId[x] = new Array(gridRows);
 		for (var y = 0; y < gridRows; y++) {
-			groupId[x][y] = '';
+			state.groupId[x][y] = '';
 		}
 	}
 	for (var x = 0; x < gridColumns; x++) {
 		for (var y = 0; y < gridRows; y++) {
-			if ((getVertex(x, y) != '.') && (groupId[x][y] === '')) {
-				groupStoneSet[x + '_' + y]=new Set();
-				groupLibertySet[x + '_' + y]=new Set();
-				paintGroupId(x, y, x + '_' + y);
+			if ((getVertex(state, x, y) != '.') && (state.groupId[x][y] === '')) {
+				state.groupStoneSet[x + '_' + y]=new Set();
+				state.groupLibertySet[x + '_' + y]=new Set();
+				paintGroupId(state, x, y, x + '_' + y);
 			}
 		}
 	}
@@ -531,18 +616,22 @@ function redrawStones() {
 	}
 }
 
+function getCurVertex(x, y) {
+	return getVertex(boardStates[stateIndex], x, y);
+}
+
 function drawSvgStone(x,y) {
 	x=Math.floor(x);
 	y=Math.floor(y);
 	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
 		return;
-	if (getVertex(x, y) != '.') {
+	if (getCurVertex(x, y) != '.') {
 		newStone = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
 		newStone.setAttribute('cx', x);
 		newStone.setAttribute('cy', y);
 		newStone.setAttribute('r', 0.5);
 		targetClass='vertex'+x+'_'+y;
-		switch (getVertex(x, y)) {
+		switch (getCurVertex(x, y)) {
 			case 'X':
 				newStone.setAttribute('class', targetClass+' player1');
 				break;
@@ -558,15 +647,15 @@ function drawHorizontalRectEffect(x,y) {
 	y=Math.floor(y);
 	if((gridColumns-1<=x)||(x<0)||(gridRows<=y)||(y<0))
 		return;
-	if ((getVertex(x, y) != '.') && (getVertex(x + 1, y) != '.')) {
+	if ((getCurVertex(x, y) != '.') && (getCurVertex(x + 1, y) != '.')) {
 		newCompare2 = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
 		newCompare2.setAttribute('x', x);
 		newCompare2.setAttribute('y', y - 0.5);
 		newCompare2.setAttribute('width', 1);
 		newCompare2.setAttribute('height', 1);
 		targetClass='vertex'+x+'_'+y+' vertex'+(x+1)+'_'+y;
-		if (getVertex(x, y) == getVertex(x + 1, y)) {
-			switch (getVertex(x, y)) {
+		if (getCurVertex(x, y) == getCurVertex(x + 1, y)) {
+			switch (getCurVertex(x, y)) {
 				case 'X':
 					newCompare2.setAttribute('class', targetClass+' player1');
 					break;
@@ -586,15 +675,15 @@ function drawVerticalRectEffect(x,y) {
 	y=Math.floor(y);
 	if((gridColumns<=x)||(x<0)||(gridRows-1<=y)||(y<0))
 		return;
-	if ((getVertex(x, y) != '.') && (getVertex(x, y + 1) != '.')) {
+	if ((getCurVertex(x, y) != '.') && (getCurVertex(x, y + 1) != '.')) {
 		newCompare2 = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
 		newCompare2.setAttribute('x', x - 0.5);
 		newCompare2.setAttribute('y', y);
 		newCompare2.setAttribute('width', 1);
 		newCompare2.setAttribute('height', 1);
 		targetClass='vertex'+x+'_'+y+' vertex'+x+'_'+(y+1);
-		if (getVertex(x, y) == getVertex(x, y + 1)) {
-			switch (getVertex(x, y)) {
+		if (getCurVertex(x, y) == getCurVertex(x, y + 1)) {
+			switch (getCurVertex(x, y)) {
 				case 'X':
 					newCompare2.setAttribute('class', targetClass+' player1');
 					break;
@@ -616,25 +705,25 @@ function drawCompare3Effect(x,y) {
 		return;
 	var compare3 = 'E';
 	var targetClass='';
-	if ((getVertex(x, y) == getVertex(x, y + 1)) && (getVertex(x, y) != '.')) {
+	if ((getCurVertex(x, y) == getCurVertex(x, y + 1)) && (getCurVertex(x, y) != '.')) {
 		targetClass='vertex'+x+'_'+y+' vertex'+x+'_'+(y+1);
-		if (getVertex(x, y) == getVertex(x + 1, y + 1)) {
+		if (getCurVertex(x, y) == getCurVertex(x + 1, y + 1)) {
 			targetClass+=' vertex'+(x+1)+'_'+(y+1);
-			compare3 = getVertex(x, y);
+			compare3 = getCurVertex(x, y);
 		}
-		if (getVertex(x, y) == getVertex(x + 1, y)) {
+		if (getCurVertex(x, y) == getCurVertex(x + 1, y)) {
 			targetClass+=' vertex'+(x+1)+'_'+y;
-			compare3 = getVertex(x, y);
+			compare3 = getCurVertex(x, y);
 		}
-	} else if ((getVertex(x + 1, y) == getVertex(x + 1, y + 1)) && (getVertex(x + 1, y) != '.')) {
+	} else if ((getCurVertex(x + 1, y) == getCurVertex(x + 1, y + 1)) && (getCurVertex(x + 1, y) != '.')) {
 		targetClass='vertex'+(x+1)+'_'+y+' vertex'+(x+1)+'_'+(y+1);
-		if (getVertex(x, y) == getVertex(x + 1, y)) {
+		if (getCurVertex(x, y) == getCurVertex(x + 1, y)) {
 			targetClass+=' vertex'+x+'_'+y;
-			compare3 = getVertex(x + 1, y);
+			compare3 = getCurVertex(x + 1, y);
 		}
-		if (getVertex(x, y + 1) == getVertex(x + 1, y)) {
+		if (getCurVertex(x, y + 1) == getCurVertex(x + 1, y)) {
 			targetClass+=' vertex'+x+'_'+(y+1);
-			compare3 = getVertex(x + 1, y);
+			compare3 = getCurVertex(x + 1, y);
 		}
 	}
 	if (compare3 != 'E') {
