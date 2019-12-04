@@ -19,7 +19,7 @@
 		</select>
 		<button type="button" onclick="pass();">Pass</button>
 		<text>[Player <text id="playerIndicator">1</text> to move.]</text>
-		<!-- <text>[Goto move <input type="number" id="move" name="move" min="0" max="0" value="0" onchange="undo();">]</text> -->
+		<text>[Goto move <input type="number" id="move" name="move" min="0" max="0" value="0" onchange="undo();">]</text>
 		<svg id="svgBoard" viewBox="-0.6 -0.6 3.2 3.2" xmlns="http://www.w3.org/2000/svg">
 			<defs>
 				<mask id="4circles">
@@ -88,7 +88,7 @@ The lines that have less valid characters than the line with the most valid char
 
 
 		<script type="text/javascript">
-//TODO: undo, game-tree, SmartGameFormat support
+//TODO: game-tree, SmartGameFormat support
 
 boardMarginWidth = 0.1;
 gridLineWidth = 0.1;
@@ -148,28 +148,24 @@ function guiPlayMove(x,y) {
 	x=Math.floor(x);
 	y=Math.floor(y);
 	if (!isIllegalMove(boardStates[stateIndex], x, y)) {
+		cutOffExtraStates();
 		boardStates = boardStates.slice(0, stateIndex+1);
 		boardStates.push(JSON.parse(JSON.stringify(boardStates[stateIndex])));
 		stateIndex++;
-		/*numberMove.setAttribute('max', stateIndex);
-		numberMove.value = stateIndex;*/
+		updateMoveNumber();
 		recalculateLiberties(boardStates[stateIndex]);
 		playMove(boardStates[stateIndex], x, y, true);
 		initLegalMoves(boardStates[stateIndex]);
-		switch (boardStates[stateIndex].playerToMove) {
-			case 'X':
-				svgBoardNextMove.setAttribute('class', 'player1');
-				playerIndicator.innerHTML='1';
-				break;
-			case 'O':
-				svgBoardNextMove.setAttribute('class', 'player2');
-				playerIndicator.innerHTML='2';
-				break;
-		}
 		svgBoardNextMove.setAttribute('cy', -3);
+		updatePlayerToMove();
 	} else {
 		console.log('Illegal move.');
 	}
+}
+
+function updateMoveNumber() {
+	numberMove.setAttribute('max', stateIndex);
+	numberMove.value = stateIndex;
 }
 
 function playMove(state, x, y, updateGui) {
@@ -203,15 +199,17 @@ function playMove(state, x, y, updateGui) {
 	switchPlayer(state);
 }
 
-function pass() {
-	boardStates = boardStates.slice(0, stateIndex+1);
-	boardStates.push(JSON.parse(JSON.stringify(boardStates[stateIndex])));
-	stateIndex++;
-	/*numberMove.setAttribute('max', stateIndex);
-	numberMove.value = stateIndex;*/
-	recalculateLiberties(boardStates[stateIndex]);
-	boardStates[stateIndex].koY=-1;
-	switchPlayer(boardStates[stateIndex]);
+function cutOffExtraStates() {
+	if (boardStates.length == stateIndex + 1)
+		return;
+	var boardStates2 = [];
+	for (i=0; i<=stateIndex; i++) {
+		boardStates2.push(boardStates[i]);
+	}
+	boardStates = boardStates2;
+}
+
+function updatePlayerToMove() {
 	switch (boardStates[stateIndex].playerToMove) {
 		case 'X':
 			svgBoardNextMove.setAttribute('class', 'player1');
@@ -222,6 +220,18 @@ function pass() {
 			playerIndicator.innerHTML='2';
 			break;
 	}
+}
+
+function pass() {
+	cutOffExtraStates();
+	boardStates.push(JSON.parse(JSON.stringify(boardStates[stateIndex])));
+	stateIndex++;
+	updateMoveNumber();
+	recalculateLiberties(boardStates[stateIndex]);
+	initLegalMoves(boardStates[stateIndex]);
+	boardStates[stateIndex].koY=-1;
+	switchPlayer(boardStates[stateIndex]);
+	updatePlayerToMove();
 	svgBoardNextMove.setAttribute('cy', -3);
 }
 
@@ -236,7 +246,6 @@ function mergeGroups(state,x,y,id2) {
 			gid=state.groupId[x][y];
 			id2=state.groupId[id2.split('_')[0]][id2.split('_')[1]];
 			if(gid!==id2){
-				//TODO:make canonical
 				for (stone of state.groupStoneSet[id2]){
 					state.groupStoneSet[gid].add(stone);
 					state.groupId[stone.split('_')[0]][stone.split('_')[1]]=gid;
@@ -303,7 +312,6 @@ function removeSvgStone(x,y) {
 	y=Math.floor(y);
 	for (e of svgBoard.querySelectorAll('.vertex'+x+'_'+y)){
 		e.parentElement.removeChild(e);
-		//TODO consider removing a single stone rather than the whole group
 	}
 }
 
@@ -332,7 +340,6 @@ function drawSvgStoneWithEffects(x,y) {
 	drawHorizontalRectEffect(x,y);
 	drawVerticalRectEffect(x,y-1);
 	drawVerticalRectEffect(x,y);
-	//TODO remove duplicates
 	drawCompare3Effect(x-1,y);
 	drawCompare3Effect(x,y);
 	drawCompare3Effect(x-1,y-1);
@@ -360,7 +367,6 @@ function addLiberty2(state, x, y, vertex) {
 		case 'E':
 			return;
 	}
-	//console.log('addLiberty2',x,y);
 	state.groupLibertySet[state.groupId[x][y]].add(vertex);
 }
 
@@ -445,6 +451,7 @@ var stateIndex = -1;
 
 function undo() {
 	stateIndex = numberMove.value;
+	updatePlayerToMove();
 	redrawStones();
 	redrawEffects();
 }
@@ -493,6 +500,8 @@ function initBoardWithText(boardTextTemp) {
 	recalculateLiberties(boardStates[0]);
 	redrawStones();
 	redrawEffects();
+	updateMoveNumber();
+	updatePlayerToMove();
 }
 
 function exportPosition() {
@@ -525,6 +534,8 @@ function freshBoard() {
 	recalculateLiberties(boardStates[0]);
 	redrawStones();
 	redrawEffects();
+	updateMoveNumber();
+	updatePlayerToMove();
 }
 
 function initLegalMoves(state) {
@@ -584,7 +595,6 @@ function paintGroupId(state, x, y, id) {
 }
 
 function recalculateLiberties(state) {
-	//TODO correct method
 	state.groupId = [];
 	state.groupLibertySet = new Map();
 	state.groupStoneSet = new Map();
