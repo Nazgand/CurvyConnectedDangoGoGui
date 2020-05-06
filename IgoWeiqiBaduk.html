@@ -10,27 +10,21 @@
 			.grid {fill: #eaad6f;}
 			rect#board {fill: #fabd7f;}
 			rect#boardmargin {fill: grey;}
+			textarea {width:100%;font-size: 11px;}
 		</style>
 	</head>
 	<body>
-		<select name="mousemode" onchange="mouseMode=this.value;">
-			<option value="singleClickToMove">Single-click to place stones.</option>
-			<option value="doubleClickToMove">Double-click to place stones.</option>
-		</select>
-		<button type="button" onclick="pass();">Pass</button>
-		<text>[Player <text id="playerIndicator">1</text> to move.]</text>
-		<text>[Goto move <input type="number" id="move" name="move" min="0" max="0" value="0" onchange="undo();">]</text>
 		<svg id="svgBoard" viewBox="-0.6 -0.6 3.2 3.2" xmlns="http://www.w3.org/2000/svg">
 			<defs>
-				<mask id="4circles">
+				<mask id="FourCircles">
 					<rect x="0" y="0" width="1" height="1" fill="white"/>
 					<circle cx="0" cy="0" r="0.5" fill="black"/>
 					<circle cx="0" cy="1" r="0.5" fill="black"/>
 					<circle cx="1" cy="0" r="0.5" fill="black"/>
 					<circle cx="1" cy="1" r="0.5" fill="black"/>
 				</mask>
-				<symbol id="squareMinus4circles">
-					<rect x="0" y="0" width="1" height="1" mask="url(#4circles)"/>
+				<symbol id="squareMinusFourCircles">
+					<rect x="0" y="0" width="1" height="1" mask="url(#FourCircles)"/>
 				</symbol>
 			</defs>
 			<rect id="boardmargin" x="-0.6" y="-0.6" rx="0.6" ry="0.6" width="3.2" height="3.2"/>
@@ -41,13 +35,20 @@
 			<g id="same2"/>
 			<g id="stones"/>
 			<circle class="player1" id="nextMove" cx="-2" cy="-2" r="0.45" fill-opacity="0.5" stroke="#7f7f7f" stroke-width="0.1"/>
-		<hr/>
+		</svg>
+		<hr/>ac
+		<select name="mousemode" onchange="mouseMode=this.value;">
+			<option value="singleClickToMove">Single-click to place stones.</option>
+			<option value="doubleClickToMove">Double-click to place stones.</option>
+		</select>
+		<button type="button" onclick="pass();">Pass</button>
+		<span style="white-space: nowrap">[Player <span id="playerIndicator">1</span> to move.]</span>
+		<span style="white-space: nowrap">[Goto move <input type="number" id="move" name="move" min="0" max="0" value="0" onchange="undo();">]</span>
 		<select name="capturemode" onchange="captureMode=this.value;">
 			<option value="removeStones">Capture removes stones.</option>
 			<option value="flipStones">Capture flips stones.</option>
 		</select>
 		<hr/>
-		</svg>
 		EastWest:
 		<input id="width" name="width" type="number" min="1" value="9"/>
 		NorthSouth:
@@ -57,7 +58,7 @@
 		<button type="button" onclick="initBoardWithText(document.querySelector('textarea[name=\'importPosition\']').value);">Import position</button>
 		<button type="button" onclick="exportPosition();">Export position</button>
 		<br/>
-		<textarea name="importPosition" rows="30" cols="80">
+		<textarea name="importPosition" rows="30" cols="90">
 GNU Go and Leela Zero terminal board positions accepted!
 The only characters that will be parsed are: '.', '+', 'O', 'X', '\n'!
     A B C D E F G H J K L M N O P Q R S T        Last move: Black H16
@@ -87,7 +88,7 @@ The lines that have less valid characters than the line with the most valid char
 
 
 
-		<script type="text/javascript">
+		<script>
 //TODO: game-tree, SmartGameFormat support
 
 boardMarginWidth = 0.1;
@@ -739,7 +740,7 @@ function drawCompare3Effect(x,y) {
 	if (compare3 != 'E') {
 		//console.log('3star');
 		newCompare3 = document.createElementNS('http://www.w3.org/2000/svg', 'use');
-		newCompare3.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#squareMinus4circles");
+		newCompare3.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#squareMinusFourCircles");
 		newCompare3.setAttribute('x', x);
 		newCompare3.setAttribute('y', y);
 		switch (compare3) {
