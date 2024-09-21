@@ -70,10 +70,13 @@
 		</svg>
 
         <!-- Game Tree Container -->
-        <div id="gameTreeContainer" style=" overflow-y: auto;">
+        <div id="gameTreeContainer">
             <h3>Game Tree</h3>
             <ul id="gameTree"></ul>
         </div>
+
+		<!-- Export Button -->
+		<button type="button" onclick="exportToSGF();">Export to SGF</button>
         
 		<hr />
 		<select name="mousemode" onchange="mouseMode=this.value;">
@@ -333,6 +336,120 @@ svgBoard.onclick = function(e) {
         }
     }
 };
+
+function intToChar(n) {
+    if (n >= 0 && n <= 25) {
+        // 'a' to 'z' for indices 0 to 25
+        return String.fromCharCode('a'.charCodeAt(0) + n);
+    } else if (n >= 26 && n <= 51) {
+        // 'A' to 'Z' for indices 26 to 51
+        return String.fromCharCode('A'.charCodeAt(0) + n - 26);
+    } else {
+        throw new Error('Coordinate out of range for SGF (max 52x52 board size)');
+    }
+}
+
+function convertCoordinatesToSGF(x, y) {
+    const sgfX = intToChar(x);
+    const sgfY = intToChar(y);
+    return sgfX + sgfY;
+}
+
+function exportToSGF() {
+    let sgfContent = generateSGF(rootNode);
+    // Create a blob and initiate download
+    let blob = new Blob([sgfContent], {type: 'application/x-go-sgf'});
+    let link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'CurvyConnectedDangoGoGui'+Date.now()+'.sgf';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function generateSGF(node) {
+    let sgf = '';
+    sgf += '('; // Start of variation
+
+    if (node.parent === null) {
+        // Root node properties
+        sgf += ';';
+        sgf += 'FF[4]'; // File format version
+        sgf += 'GM[1]'; // Game type (1 = Go)
+        sgf += 'CA[UTF-8]'; // Unicode format
+        sgf += 'AP[CurvyConnectedDangoGoGui]'; // Application name
+
+        // Adjust the board size property for rectangular boards
+        if (gridColumns === gridRows) {
+            sgf += 'SZ[' + gridColumns + ']'; // Square board
+        } else {
+            sgf += 'SZ[' + gridColumns + ':' + gridRows + ']'; // Rectangular board
+        }
+
+        // Collect initial stones
+        let blackStones = [];
+        let whiteStones = [];
+        for (let y = 0; y < gridRows; y++) {
+            for (let x = 0; x < gridColumns; x++) {
+                let stone = node.state.boardText[y][x];
+                if (stone === 'X') {
+                    blackStones.push(convertCoordinatesToSGF(x, y));
+                } else if (stone === 'O') {
+                    whiteStones.push(convertCoordinatesToSGF(x, y));
+                }
+            }
+        }
+
+        // Add initial stones to SGF
+        if (blackStones.length > 0) {
+            sgf += 'AB';
+            blackStones.forEach(coord => {
+                sgf += '[' + coord + ']';
+            });
+        }
+        if (whiteStones.length > 0) {
+            sgf += 'AW';
+            whiteStones.forEach(coord => {
+                sgf += '[' + coord + ']';
+            });
+        }
+
+        // You can add more properties like player names, etc.
+    } else {
+        // Add move
+        sgf += ';';
+        let move = node.move;
+        let moveStr = '';
+        if (move.player === 'X') {
+            moveStr += 'B';
+        } else if (move.player === 'O') {
+            moveStr += 'W';
+        }
+        if (move.x >= 0 && move.y >= 0) {
+            let coords = convertCoordinatesToSGF(move.x, move.y);
+            moveStr += '[' + coords + ']';
+        } else {
+            // Pass move
+            moveStr += '[]';
+        }
+        sgf += moveStr;
+    }
+
+    if (node.children.length > 0) {
+        if (node.children.length === 1) {
+            // Continue the main line without starting a new variation
+            sgf += generateSGF(node.children[0]).slice(1, -1); // Remove outer parentheses
+        } else {
+            // Multiple variations
+            for (let child of node.children) {
+                sgf += generateSGF(child);
+            }
+        }
+    }
+
+    sgf += ')'; // End of variation
+    return sgf;
+}
 
 function guiPlayMove(x, y) {
     x = Math.floor(x);
