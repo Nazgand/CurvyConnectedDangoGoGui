@@ -18,6 +18,28 @@
                 max-height: 100vh;
                 max-width: 100vh;
             }
+            #gameTreeContainer {
+                width: 100%;
+                border: 1px solid #ccc;
+                padding: 0px;
+                max-height: 390px;
+                overflow-y: auto;
+            }
+
+            #gameTree ul {
+                list-style-type: none;
+                margin: 0;
+                padding-left: 9px; /* Control indentation */
+            }
+
+            #gameTree li {
+                cursor: pointer;
+                margin: 0; /* Remove left margin */
+            }
+
+            #gameTree li.selected {
+                background-color: #e0e0e0;
+            }
 		</style>
 	</head>
 	<body>
@@ -46,6 +68,13 @@
 			<circle class="player1" id="nextMove" cx="-2" cy="-2" r="0.45"
 				fill-opacity="0.5" stroke="#7f7f7f" stroke-width="0.1" />
 		</svg>
+
+        <!-- Game Tree Container -->
+        <div id="gameTreeContainer" style=" overflow-y: auto;">
+            <h3>Game Tree</h3>
+            <ul id="gameTree"></ul>
+        </div>
+        
 		<hr />
 		<select name="mousemode" onchange="mouseMode=this.value;">
 			<option value="singleClickToMove">Single-click to place stones.</option>
@@ -54,8 +83,6 @@
 		<button type="button" onclick="pass();">Pass</button>
 		<span style="white-space: nowrap">[Player <span id="playerIndicator">1</span>
 			to move.]</span>
-		<span style="white-space: nowrap">[Goto move <input type="number" id="move"
-				name="move" min="0" max="0" value="0" onchange="undo();">]</span>
 		<select name="capturemode" onchange="captureMode=this.value;">
 			<option value="removeStones">Capture removes stones.</option>
 			<option value="flipStones">Capture flips stones.</option>
@@ -102,6 +129,72 @@ The lines that have less valid characters than the line with the most valid char
 		<script>
 //TODO: game-tree, SmartGameFormat support
 
+var nodeIdCounter = 0;
+
+function Node(state, parent, move, moveNumber) {
+    this.id = nodeIdCounter++; // Unique node ID
+    this.state = state; // The board state at this node
+    this.parent = parent; // The parent node
+    this.children = []; // Array of child nodes
+    this.move = move; // The move that led to this state
+    this.moveNumber = moveNumber; // The move number at this node
+}
+var rootNode;
+var currentNode;
+
+function updateGameTreeView() {
+    let gameTreeElement = document.getElementById('gameTree');
+    gameTreeElement.innerHTML = '';
+    buildGameTreeView(rootNode, gameTreeElement);
+}
+
+function buildGameTreeView(node, parentElement) {
+    let li = document.createElement('li');
+    li.textContent = node.moveNumber + (node.move ? ': ' + node.move.player + ' (' + node.move.x + ',' + node.move.y + ')' : 'Root');
+    li.onclick = function () {
+        event.stopPropagation(); // Prevent event bubbling
+        currentNode = node;
+        recalculateLiberties(currentNode.state);
+        initLegalMoves(currentNode.state);
+        updatePlayerToMove();
+        redrawStones();
+        redrawEffects();
+        highlightSelectedNode();
+    };
+
+    li.setAttribute('data-node-id', node.id);
+
+    parentElement.appendChild(li);
+
+    if (node.children.length > 0) {
+        let ul = document.createElement('ul');
+        li.appendChild(ul);
+        node.children.forEach(child => {
+            buildGameTreeView(child, ul);
+        });
+    }
+}
+
+function getNodePath(node) {
+    let path = [];
+    while (node.parent) {
+        let index = node.parent.children.indexOf(node);
+        path.unshift(index);
+        node = node.parent;
+    }
+    return path.join('-');
+}
+
+function highlightSelectedNode() {
+    let selectedNodes = document.querySelectorAll('#gameTree li.selected');
+    selectedNodes.forEach(node => node.classList.remove('selected'));
+
+    let nodeElement = document.querySelector('#gameTree li[data-node-id="' + currentNode.id + '"]');
+    if (nodeElement) {
+        nodeElement.classList.add('selected');
+    }
+}
+
 boardMarginWidth = 0.1;
 gridLineWidth = 0.1;
 gridRows = 1;
@@ -115,7 +208,6 @@ var svgBoardGrid = svgBoard.getElementById('grid');
 var svgBoardStones = svgBoard.getElementById('stones');
 var svgBoardNextMove = svgBoard.getElementById('nextMove');
 
-var numberMove = document.getElementById('move');
 var numberWidth = document.getElementById('width');
 var numberHeight = document.getElementById('height');
 
@@ -161,7 +253,7 @@ svgBoard.onmousemove = function(e) {
         svgBoardNextMove.setAttribute('cx', gridX);
         svgBoardNextMove.setAttribute('cy', gridY);
 
-        if (isIllegalMove(boardStates[stateIndex], gridX, gridY)) {
+        if (isIllegalMove(currentNode.state, gridX, gridY)) {
             // If the move is illegal, show the red X
             svgBoardIllegalMove.style.display = 'block';
 
@@ -210,7 +302,7 @@ svgBoard.ondblclick = function(e) {
         let gridX = Math.floor(gridColumns * mouseX / boardWidth);
         let gridY = Math.floor(gridRows * mouseY / boardHeight);
 
-        if (!isIllegalMove(boardStates[stateIndex], gridX, gridY) && mouseMode === 'doubleClickToMove') {
+        if (!isIllegalMove(currentNode.state, gridX, gridY) && mouseMode === 'doubleClickToMove') {
             guiPlayMove(gridX, gridY);
         }
     }
@@ -236,34 +328,46 @@ svgBoard.onclick = function(e) {
         let gridX = Math.floor(gridColumns * mouseX / boardWidth);
         let gridY = Math.floor(gridRows * mouseY / boardHeight);
 
-        if (!isIllegalMove(boardStates[stateIndex], gridX, gridY) && mouseMode === 'singleClickToMove') {
+        if (!isIllegalMove(currentNode.state, gridX, gridY) && mouseMode === 'singleClickToMove') {
             guiPlayMove(gridX, gridY);
         }
     }
 };
 
-function guiPlayMove(x,y) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	if (!isIllegalMove(boardStates[stateIndex], x, y)) {
-		cutOffExtraStates();
-		boardStates = boardStates.slice(0, stateIndex+1);
-		boardStates.push(JSON.parse(JSON.stringify(boardStates[stateIndex])));
-		stateIndex++;
-		updateMoveNumber();
-		recalculateLiberties(boardStates[stateIndex]);
-		playMove(boardStates[stateIndex], x, y, true);
-		initLegalMoves(boardStates[stateIndex]);
-		svgBoardNextMove.setAttribute('cy', -3);
-		updatePlayerToMove();
-	} else {
-		console.log('Illegal move.');
-	}
-}
+function guiPlayMove(x, y) {
+    x = Math.floor(x);
+    y = Math.floor(y);
+    if (!isIllegalMove(currentNode.state, x, y)) {
+        // Check if the move already exists in the children
+        let existingChild = currentNode.children.find(child => {
+            return child.move && child.move.x === x && child.move.y === y;
+        });
 
-function updateMoveNumber() {
-	numberMove.setAttribute('max', stateIndex);
-	numberMove.value = stateIndex;
+        if (existingChild) {
+            // Move to the existing child
+            currentNode = existingChild;
+        } else {
+            // Create a new state by copying the current state
+            let newState = JSON.parse(JSON.stringify(currentNode.state));
+            recalculateLiberties(newState);
+            playMove(newState, x, y, false);
+            initLegalMoves(newState);
+
+            // Create a new node and add it as a child
+            let newNode = new Node(newState, currentNode, { x: x, y: y, player: currentNode.state.playerToMove }, currentNode.moveNumber + 1);
+            currentNode.children.push(newNode);
+            currentNode = newNode;
+        }
+
+        updatePlayerToMove();
+        redrawStones();
+        redrawEffects();
+    } else {
+        console.log('Illegal move.');
+    }
+
+    updateGameTreeView();
+    highlightSelectedNode();
 }
 
 function playMove(state, x, y, updateGui) {
@@ -308,7 +412,7 @@ function cutOffExtraStates() {
 }
 
 function updatePlayerToMove() {
-	switch (boardStates[stateIndex].playerToMove) {
+	switch (currentNode.state.playerToMove) {
 		case 'X':
 			svgBoardNextMove.setAttribute('class', 'player1');
 			playerIndicator.innerHTML='1';
@@ -322,13 +426,12 @@ function updatePlayerToMove() {
 
 function pass() {
 	cutOffExtraStates();
-	boardStates.push(JSON.parse(JSON.stringify(boardStates[stateIndex])));
+	boardStates.push(JSON.parse(JSON.stringify(currentNode.state)));
 	stateIndex++;
-	updateMoveNumber();
-	recalculateLiberties(boardStates[stateIndex]);
-	initLegalMoves(boardStates[stateIndex]);
-	boardStates[stateIndex].koY=-1;
-	switchPlayer(boardStates[stateIndex]);
+	recalculateLiberties(currentNode.state);
+	initLegalMoves(currentNode.state);
+	currentNode.state.koY=-1;
+	switchPlayer(currentNode.state);
 	updatePlayerToMove();
 	svgBoardNextMove.setAttribute('cy', -3);
 }
@@ -373,7 +476,7 @@ function subtractLiberty(state, x, y, vertex, updateGui) {
 	state.groupLibertySet[gid].delete(vertex);
 	//if captured
 	if((getVertex(state, x, y)!==state.playerToMove)&&(getVertexLibertyAmount(state, x, y)==0)){
-		if (state.groupStoneSet[gid].size == 1) {
+		if (state.groupStoneSet[gid].size == 1&&state.groupStoneSet[state.groupId[vertex.split('_')[0]][vertex.split('_')[1]]].size == 1) {
 			state.koX = x;
 			state.koY = y;
 		}
@@ -548,10 +651,15 @@ var boardStates = [];
 var stateIndex = -1;
 
 function undo() {
-	stateIndex = numberMove.value;
-	updatePlayerToMove();
-	redrawStones();
-	redrawEffects();
+    if (currentNode.parent) {
+        currentNode = currentNode.parent;
+        updatePlayerToMove();
+        redrawStones();
+        redrawEffects();
+    }
+
+    updateGameTreeView();
+    highlightSelectedNode();
 }
 
 function initBoardWithText(boardTextTemp) {
@@ -593,47 +701,78 @@ function initBoardWithText(boardTextTemp) {
 		console.log('Detected board size change', gridRows, gridColumns);
 		resizeSvgBoard();
 	}
-	boardStates[0].playerToMove = 'X';
-	initLegalMoves(boardStates[0]);
-	recalculateLiberties(boardStates[0]);
-	redrawStones();
-	redrawEffects();
-	updateMoveNumber();
-	updatePlayerToMove();
+    let initialState = {
+        boardText: boardStates[0].boardText,
+        legalMove: [],
+        groupId: boardStates[0].groupId,
+        koY: -1,
+        koX: -1,
+        groupLibertySet: boardStates[0].groupLibertySet,
+        groupStoneSet: boardStates[0].groupStoneSet,
+        playerToMove: 'X'
+    };
+
+    // Initialize legal moves and recalculate liberties
+    initLegalMoves(initialState);
+    recalculateLiberties(initialState);
+
+    rootNode = new Node(initialState, null, null, 0);
+    currentNode = rootNode;
+
+    updatePlayerToMove();
+    redrawStones();
+    redrawEffects();
+    updateGameTreeView();
+    highlightSelectedNode();
 }
 
 function exportPosition() {
 	stringBoard = '';
-	for (row of boardStates[stateIndex].boardText) {
+	for (row of currentNode.state.boardText) {
 		stringBoard += row.join('') + '\n';
 	}
 	document.querySelector('textarea[name=\'importPosition\']').value = stringBoard;
 }
 
 function freshBoard() {
-	boardStates = [{boardText:[], legalMove:[], koY:-1, koX:-1}];
-	stateIndex = 0;
-	eastWest = Math.ceil(numberWidth.value);
-	northSouth = Math.ceil(numberHeight.value);
-	if (gridRows != northSouth || gridColumns != eastWest) {
-		gridRows = northSouth;
-		gridColumns = eastWest;
-		console.log('Detected board size change', gridRows, gridColumns);
-		resizeSvgBoard();
-	}
-	for (var y = 0; y < gridRows; y++) {
-		boardStates[0].boardText[y] = [];
-		for (var x = 0; x < gridColumns; x++) {
-			boardStates[0].boardText[y][x] = '.';
-		}
-	}
-	boardStates[0].playerToMove = 'X';
-	initLegalMoves(boardStates[0]);
-	recalculateLiberties(boardStates[0]);
-	redrawStones();
-	redrawEffects();
-	updateMoveNumber();
-	updatePlayerToMove();
+    eastWest = Math.ceil(numberWidth.value);
+    northSouth = Math.ceil(numberHeight.value);
+    if (gridRows != northSouth || gridColumns != eastWest) {
+        gridRows = northSouth;
+        gridColumns = eastWest;
+        console.log('Detected board size change', gridRows, gridColumns);
+        resizeSvgBoard();
+    }
+
+    let initialState = {
+        boardText: [],
+        legalMove: [],
+        groupId: [],
+        koY: -1,
+        koX: -1,
+        groupLibertySet: new Map(),
+        groupStoneSet: new Map(),
+        playerToMove: 'X'
+    };
+
+    for (var y = 0; y < gridRows; y++) {
+        initialState.boardText[y] = [];
+        for (var x = 0; x < gridColumns; x++) {
+            initialState.boardText[y][x] = '.';
+        }
+    }
+
+    initLegalMoves(initialState);
+    recalculateLiberties(initialState);
+
+    rootNode = new Node(initialState, null, null, 0);
+    currentNode = rootNode;
+
+    redrawStones();
+    redrawEffects();
+    updatePlayerToMove();
+    updateGameTreeView();
+    highlightSelectedNode();
 }
 
 function initLegalMoves(state) {
@@ -725,7 +864,7 @@ function redrawStones() {
 }
 
 function getCurVertex(x, y) {
-	return getVertex(boardStates[stateIndex], x, y);
+	return getVertex(currentNode.state, x, y);
 }
 
 function drawSvgStone(x,y) {
