@@ -2,7 +2,7 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8">
-		<title>Igo Weiqi Baduk</title>
+		<title>CurvyConnectedDangoGoGui</title>
 		<style>
 			.conflict {fill: grey;}
 			.player1 {fill: black;}
@@ -29,7 +29,7 @@
             #gameTree ul {
                 list-style-type: none;
                 margin: 0;
-                padding-left: 9px; /* Control indentation */
+                padding-left: 3px; /* Control indentation */
             }
 
             #gameTree li {
@@ -77,7 +77,11 @@
 
 		<!-- Export Button -->
 		<button type="button" onclick="exportToSGF();">Export to SGF</button>
-        
+
+		<!-- Import Button -->
+		Load SGF:
+		<input type="file" id="sgfInput" accept=".sgf" />
+
 		<hr />
 		<select name="mousemode" onchange="mouseMode=this.value;">
 			<option value="singleClickToMove">Single-click to place stones.</option>
@@ -130,8 +134,6 @@ The lines that have less valid characters than the line with the most valid char
 		</textarea>
 
 		<script>
-//TODO: game-tree, SmartGameFormat support
-
 var nodeIdCounter = 0;
 
 function Node(state, parent, move, moveNumber) {
@@ -149,11 +151,15 @@ function updateGameTreeView() {
     let gameTreeElement = document.getElementById('gameTree');
     gameTreeElement.innerHTML = '';
     buildGameTreeView(rootNode, gameTreeElement);
+    // Force reflow
+    gameTreeElement.style.display = 'none';
+    gameTreeElement.offsetHeight; // Trigger a reflow
+    gameTreeElement.style.display = '';
 }
 
 function buildGameTreeView(node, parentElement) {
     let li = document.createElement('li');
-    li.textContent = node.moveNumber + (node.move ? ': ' + node.move.player + ' (' + node.move.x + ',' + node.move.y + ')' : 'Root');
+	li.textContent = node.moveNumber + (node.move ? ': ' + node.move.player + ' (' + node.move.x + ',' + node.move.y + ')' : ': Root');
     li.onclick = function () {
         event.stopPropagation(); // Prevent event bubbling
         currentNode = node;
@@ -337,6 +343,361 @@ svgBoard.onclick = function(e) {
     }
 };
 
+document.getElementById('sgfInput').addEventListener('change', function(event) {
+    var file = event.target.files[0];
+    if (file) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var sgfContent = e.target.result;
+            importFromSGF(sgfContent);
+        };
+        reader.readAsText(file);
+    }
+});
+
+function parseSGF(sgfContent) {
+    sgfContent = sgfContent.replace(/\s+/g, '');
+    var index = 0;
+    var length = sgfContent.length;
+    function parseCollection() {
+        var collection = [];
+        while (index < length) {
+            if (sgfContent[index] === '(') {
+                index++;
+                collection.push(parseGameTree());
+            } else {
+                index++;
+            }
+        }
+        return collection;
+    }
+    function parseGameTree() {
+        var sequence = parseSequence();
+        var subtrees = [];
+        while (index < length && sgfContent[index] === '(') {
+            index++;
+            subtrees.push(parseGameTree());
+        }
+        if (index < length && sgfContent[index] === ')') {
+            index++;
+        }
+        return { sequence: sequence, subtrees: subtrees };
+    }
+    function parseSequence() {
+        var nodes = [];
+        while (index < length && sgfContent[index] === ';') {
+            nodes.push(parseNode());
+        }
+        return nodes;
+    }
+    function parseNode() {
+        var properties = {};
+        index++;
+        while (index < length && /[A-Z]/.test(sgfContent[index])) {
+            var property = parseProperty();
+            properties[property.ident] = property.values;
+        }
+        return properties;
+    }
+    function parseProperty() {
+        var ident = '';
+        while (index < length && /[A-Z]/.test(sgfContent[index])) {
+            ident += sgfContent[index];
+            index++;
+        }
+        var values = [];
+        while (index < length && sgfContent[index] === '[') {
+            values.push(parsePropValue());
+        }
+        return { ident: ident, values: values };
+    }
+    function parsePropValue() {
+        index++;
+        var value = '';
+        while (index < length && sgfContent[index] !== ']') {
+            if (sgfContent[index] === '\\') {
+                index++;
+                if (index < length) {
+                    value += sgfContent[index];
+                    index++;
+                }
+            } else {
+                value += sgfContent[index];
+                index++;
+            }
+        }
+        index++;
+        return value;
+    }
+    return parseCollection();
+}
+
+function charToInt(c) {
+    if (c >= 'a' && c <= 'z') {
+        return c.charCodeAt(0) - 'a'.charCodeAt(0);
+    } else if (c >= 'A' && c <= 'Z') {
+        return c.charCodeAt(0) - 'A'.charCodeAt(0) + 26;
+    } else {
+        return null;
+    }
+}
+
+function convertSGFCoordToXY(coord) {
+    if (coord.length !== 2) {
+        return null;
+    }
+    var x = charToInt(coord[0]);
+    var y = charToInt(coord[1]);
+    if (x === null || y === null) {
+        return null;
+    }
+    return { x: x, y: y };
+}
+
+function importFromSGF(sgfContent) {
+    try {
+		// Clear existing game data
+		nodeIdCounter = 0;
+		rootNode = null;
+		currentNode = null;
+
+        var sgfCollection = parseSGF(sgfContent);
+        if (sgfCollection.length > 0) {
+            var gameTree = sgfCollection[0];
+            initializeGameFromSGFTree(gameTree);
+            updatePlayerToMove();
+            redrawStones();
+            redrawEffects();
+        } else {
+            console.log('No valid SGF game trees found.');
+        }
+    } catch (e) {
+        console.error('Error parsing SGF:', e);
+    }
+}
+
+function initializeGameFromSGFTree(gameTree) {
+    var rootNodeProperties = gameTree.sequence[0];
+    // Adjust the board size based on SZ property
+    var sizeProp = rootNodeProperties['SZ'];
+    if (sizeProp && sizeProp.length > 0) {
+        var size = sizeProp[0];
+        var sizes = size.split(':');
+        if (sizes.length === 2) {
+            gridColumns = parseInt(sizes[0]);
+            gridRows = parseInt(sizes[1]);
+        } else {
+            gridColumns = gridRows = parseInt(size);
+        }
+    } else {
+        gridColumns = gridRows = 19;
+    }
+    resizeSvgBoard(); // Resize the SVG board
+    
+    // Initialize the initial state
+    let initialState = {
+        boardText: [],
+        legalMove: [],
+        groupId: [],
+        koY: -1,
+        koX: -1,
+        groupLibertySet: new Map(),
+        groupStoneSet: new Map(),
+        playerToMove: 'X'
+    };
+    
+    for (var y = 0; y < gridRows; y++) {
+        initialState.boardText[y] = [];
+        for (var x = 0; x < gridColumns; x++) {
+            initialState.boardText[y][x] = '.';
+        }
+    }
+    
+    // Handle initial stones
+    var abProp = rootNodeProperties['AB'];
+    if (abProp) {
+        abProp.forEach(coord => {
+            var xy = convertSGFCoordToXY(coord);
+            if (xy) {
+                initialState.boardText[xy.y][xy.x] = 'X';
+            }
+        });
+    }
+    var awProp = rootNodeProperties['AW'];
+    if (awProp) {
+        awProp.forEach(coord => {
+            var xy = convertSGFCoordToXY(coord);
+            if (xy) {
+                initialState.boardText[xy.y][xy.x] = 'O';
+            }
+        });
+    }
+    
+    initLegalMoves(initialState);
+    recalculateLiberties(initialState);
+    
+    rootNode = new Node(initialState, null, null, 0);
+    currentNode = rootNode;
+    
+    // Redraw the board
+    redrawStones();
+    redrawEffects();
+    updatePlayerToMove();
+
+    // Start processing the main line
+    processMainLine(gameTree, rootNode);
+
+    // Now that the game tree is fully built, update the GUI
+    updateGameTreeView();
+    highlightSelectedNode();
+}
+
+function processMainLine(gameTree, parentNode) {
+    var currentParent = parentNode;
+    var sequenceStartIndex = (currentParent === rootNode) ? 1 : 0;
+    for (var i = sequenceStartIndex; i < gameTree.sequence.length; i++) {
+        var nodeProperties = gameTree.sequence[i];
+        var moveData = extractMoveFromNode(nodeProperties);
+        let newState = copyState(currentParent.state);
+        recalculateLiberties(newState);
+        initLegalMoves(newState);
+        if (moveData.move) {
+            newState.playerToMove = moveData.move.player;
+            playMove(newState, moveData.move.x, moveData.move.y, false, false);
+        } else if (moveData.pass) {
+            newState.playerToMove = moveData.pass.player;
+        }
+        newState.playerToMove = switchPlayer2(newState.playerToMove);
+        let newNode = new Node(newState, currentParent, moveData.move || moveData.pass, currentParent.moveNumber + 1);
+        currentParent.children.push(newNode);
+        currentParent = newNode;
+    }
+    if (gameTree.subtrees.length > 0) {
+        processMainLine(gameTree.subtrees[0], currentParent);
+        for (var i = 1; i < gameTree.subtrees.length; i++) {
+            processSubtree(gameTree.subtrees[i], currentParent);
+        }
+    }
+}
+
+function extractMoveFromNode(nodeProperties) {
+    var move = null;
+    var player = null;
+    if (nodeProperties['B']) {
+        player = 'X';
+        var coord = nodeProperties['B'][0];
+        move = createMoveFromCoord(coord, player);
+    } else if (nodeProperties['W']) {
+        player = 'O';
+        var coord = nodeProperties['W'][0];
+        move = createMoveFromCoord(coord, player);
+    }
+    if (move === null) {
+        // Handle pass move
+        move = { x: -1, y: -1, player: player };
+    }
+    return { move: move };
+}
+
+function createMoveFromCoord(coord, player) {
+    if (coord === '') {
+        // Pass move
+        return { x: -1, y: -1, player: player };
+    } else {
+        var xy = convertSGFCoordToXY(coord);
+        if (xy) {
+            return { x: xy.x, y: xy.y, player: player };
+        }
+    }
+    return null;
+}
+
+function processSubtree(gameTree, parentNode) {
+    var currentParent = parentNode;
+
+    // Process the sequence of moves in the variation
+    processSequence(gameTree.sequence, currentParent);
+
+    // Recursively process any sub-variations
+    gameTree.subtrees.forEach(subtree => {
+        processSubtree(subtree, currentParent);
+    });
+}
+
+function processSequence(sequence, parentNode) {
+    var currentParent = parentNode;
+
+    sequence.forEach(nodeProperties => {
+        var moveData = extractMoveFromNode(nodeProperties);
+
+        let newState = JSON.parse(JSON.stringify(currentParent.state));
+        recalculateLiberties(newState);
+        initLegalMoves(newState);
+
+        if (moveData.move) {
+            newState.playerToMove = moveData.move.player;
+            playMove(newState, moveData.move.x, moveData.move.y, false, false);
+        } else if (moveData.pass) {
+            newState.playerToMove = moveData.pass.player;
+        }
+
+        // Switch player
+        newState.playerToMove = switchPlayer2(newState.playerToMove);
+
+        let newNode = new Node(newState, currentParent, moveData.move || moveData.pass, currentParent.moveNumber + 1);
+        currentParent.children.push(newNode);
+        currentParent = newNode;
+    });
+}
+
+function createEmptyState() {
+    let state = {
+        boardText: [],
+        legalMove: [],
+        groupId: [],
+        koY: -1,
+        koX: -1,
+        groupLibertySet: new Map(),
+        groupStoneSet: new Map(),
+        playerToMove: 'X'
+    };
+
+    for (var y = 0; y < gridRows; y++) {
+        state.boardText[y] = [];
+        for (var x = 0; x < gridColumns; x++) {
+            state.boardText[y][x] = '.';
+        }
+    }
+
+    return state;
+}
+
+function copyState(oldState) {
+    let newState = {
+        boardText: [],
+        legalMove: [],
+        groupId: [],
+        koY: oldState.koY,
+        koX: oldState.koX,
+        groupLibertySet: new Map(),
+        groupStoneSet: new Map(),
+        playerToMove: oldState.playerToMove
+    };
+    var numRows = oldState.boardText.length;
+    var numCols = oldState.boardText[0].length;
+    for (var y = 0; y < numRows; y++) {
+        newState.boardText[y] = [];
+        newState.legalMove[y] = [];
+        newState.groupId[y] = [];
+        for (var x = 0; x < numCols; x++) {
+            newState.boardText[y][x] = oldState.boardText[y][x];
+            newState.legalMove[y][x] = '?';
+            newState.groupId[y][x] = '';
+        }
+    }
+    return newState;
+}
+
 function intToChar(n) {
     if (n >= 0 && n <= 25) {
         // 'a' to 'z' for indices 0 to 25
@@ -487,35 +848,61 @@ function guiPlayMove(x, y) {
     highlightSelectedNode();
 }
 
-function playMove(state, x, y, updateGui) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	state.koY=-1;
-	setVertex(state, x, y, state.playerToMove);
-	if (updateGui) {
-		drawSvgStoneWithEffects(x,y);
-	}
-	vertex=x+'_'+y;
-	state.groupStoneSet[vertex]=new Set([vertex]);
-	state.groupLibertySet[vertex]=new Set();
-	if (getVertex(state, x + 1, y) === '.')
-		state.groupLibertySet[vertex].add((x + 1)+'_'+ y);
-	if (getVertex(state, x - 1, y) === '.')
-		state.groupLibertySet[vertex].add((x - 1)+'_'+ y);
-	if (getVertex(state, x, y + 1) === '.')
-		state.groupLibertySet[vertex].add(x+'_'+ (y+1))
-	if (getVertex(state, x, y - 1) === '.')
-		state.groupLibertySet[vertex].add(x+'_'+ (y-1))
-	state.groupId[x][y]=vertex;
-	mergeGroups(state, x+1, y,vertex);
-	mergeGroups(state, x-1, y,vertex);
-	mergeGroups(state, x, y+1,vertex);
-	mergeGroups(state, x, y-1,vertex);
-	subtractLiberty(state, x+1, y, vertex, updateGui);
-	subtractLiberty(state, x-1, y, vertex, updateGui);
-	subtractLiberty(state, x, y+1, vertex, updateGui);
-	subtractLiberty(state, x, y-1, vertex, updateGui);
-	switchPlayer(state);
+function playMove(state, x, y, updateGui, doSwitchPlayer = true) {
+    x = Math.floor(x);
+    y = Math.floor(y);
+    var numRows = state.boardText.length;
+    var numCols = state.boardText[0].length;
+    state.koY = -1;
+    state.koX = -1;
+    setVertex(state, x, y, state.playerToMove);
+    if (updateGui) {
+        drawSvgStoneWithEffects(x, y);
+    }
+    var vertex = x + '_' + y;
+    state.groupStoneSet[vertex] = new Set([vertex]);
+    state.groupLibertySet[vertex] = new Set();
+
+    // Initialize groupId array if necessary
+    if (!state.groupId[y]) {
+        state.groupId[y] = [];
+    }
+    state.groupId[y][x] = vertex;
+
+    // Define directions for adjacent positions
+    const directions = [
+        { dx: 1, dy: 0 },
+        { dx: -1, dy: 0 },
+        { dx: 0, dy: 1 },
+        { dx: 0, dy: -1 }
+    ];
+
+    // Add liberties to the new group
+    directions.forEach(({ dx, dy }) => {
+        let nx = x + dx;
+        let ny = y + dy;
+        if (getVertex(state, nx, ny) === '.') {
+            state.groupLibertySet[vertex].add(nx + '_' + ny);
+        }
+    });
+
+    // Merge with adjacent friendly groups
+    directions.forEach(({ dx, dy }) => {
+        let nx = x + dx;
+        let ny = y + dy;
+        mergeGroups(state, nx, ny, vertex);
+    });
+
+    // Subtract liberties from adjacent enemy groups and check for captures
+    directions.forEach(({ dx, dy }) => {
+        let nx = x + dx;
+        let ny = y + dy;
+        subtractLiberty(state, nx, ny, vertex, updateGui);
+    });
+
+    if (doSwitchPlayer) {
+        switchPlayer(state);
+    }
 }
 
 function cutOffExtraStates() {
@@ -553,76 +940,80 @@ function pass() {
 	svgBoardNextMove.setAttribute('cy', -3);
 }
 
-function mergeGroups(state,x,y,id2) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	switch(getVertex(state,x,y)){
-		case '.':
-		case 'E':
-			return;
-		case getVertex(state,id2.split('_')[0],id2.split('_')[1]):
-			gid=state.groupId[x][y];
-			id2=state.groupId[id2.split('_')[0]][id2.split('_')[1]];
-			if(gid!==id2){
-				for (stone of state.groupStoneSet[id2]){
-					state.groupStoneSet[gid].add(stone);
-					state.groupId[stone.split('_')[0]][stone.split('_')[1]]=gid;
-				}
-				state.groupStoneSet.delete(id2);
-				for (liberty of state.groupLibertySet[id2]){
-					state.groupLibertySet[gid].add(liberty);
-				}
-				state.groupLibertySet.delete(id2);
-			}
-	}
+function mergeGroups(state, x, y, id2) {
+    x = Math.floor(x);
+    y = Math.floor(y);
+    var numRows = state.boardText.length;
+    var numCols = state.boardText[0].length;
+    if ((numCols <= x) || (x < 0) || (numRows <= y) || (y < 0)) return;
+    let currentVertex = getVertex(state, x, y);
+    let id2Coords = id2.split('_');
+    let id2X = parseInt(id2Coords[0]);
+    let id2Y = parseInt(id2Coords[1]);
+    if (currentVertex === '.' || currentVertex === 'E') return;
+    if (currentVertex == getVertex(state, id2X, id2Y)) {
+        let gid = state.groupId[y][x];
+        id2 = state.groupId[id2Y][id2X];
+        if (gid !== id2) {
+            for (let stone of state.groupStoneSet[id2]) {
+                state.groupStoneSet[gid].add(stone);
+                let [stoneX, stoneY] = stone.split('_').map(Number);
+                state.groupId[stoneY][stoneX] = gid;
+            }
+            state.groupStoneSet.delete(id2);
+            for (let liberty of state.groupLibertySet[id2]) {
+                state.groupLibertySet[gid].add(liberty);
+            }
+            state.groupLibertySet.delete(id2);
+        }
+    }
 }
 
 var captureMode = 'removeStones';
 
 function subtractLiberty(state, x, y, vertex, updateGui) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
-		return;
-	switch(getVertex(state, x, y)){
-		case '.':
-		case 'E':
-			return;
-	}
-	gid=state.groupId[x][y];
-	state.groupLibertySet[gid].delete(vertex);
-	//if captured
-	if((getVertex(state, x, y)!==state.playerToMove)&&(getVertexLibertyAmount(state, x, y)==0)){
-		if (state.groupStoneSet[gid].size == 1&&state.groupStoneSet[state.groupId[vertex.split('_')[0]][vertex.split('_')[1]]].size == 1) {
-			state.koX = x;
-			state.koY = y;
-		}
-		switch (captureMode) {
-			case 'removeStones':
-				for (stone of state.groupStoneSet[gid]){
-					setVertex(state, stone.split('_')[0],stone.split('_')[1],'.');
-					if (updateGui) {
-						removeSvgStone(stone.split('_')[0],stone.split('_')[1]);
-					}
-				}
-				for (stone of state.groupStoneSet[gid]){
-					addLiberty(state, stone.split('_')[0],stone.split('_')[1]);
-					state.groupId[stone.split('_')[0]][stone.split('_')[1]]='';
-				}
-				state.groupLibertySet.delete(gid);
-				state.groupStoneSet.delete(gid);
-				break;
-			case 'flipStones':
-				for (stone of state.groupStoneSet[gid]){
-					color = getVertex(state, stone.split('_')[0],stone.split('_')[1]);
-					setVertex(state, stone.split('_')[0],stone.split('_')[1], switchPlayer2(color));
-					if (updateGui) {
-						redrawStones();
-						redrawEffects();
-					}
-				}
-		}
-	}
+    x = Math.floor(x);
+    y = Math.floor(y);
+    if ((state.boardText[0].length <= x) || (x < 0) || (state.boardText.length <= y) || (y < 0)) return;
+
+    let currentVertex = getVertex(state, x, y);
+    if (currentVertex === '.' || currentVertex === 'E') return;
+
+    let gid = state.groupId[y][x]; // Captured group's ID
+    state.groupLibertySet[gid].delete(vertex);
+
+    // Check for capture
+    if (currentVertex !== state.playerToMove && getVertexLibertyAmount(state, x, y) === 0) {
+        let capturedGroupSize = state.groupStoneSet[gid].size;
+
+        // Get the capturing stone's coordinates from vertex
+        let [capturingStoneX, capturingStoneY] = vertex.split('_').map(Number);
+        let capturingGroupId = state.groupId[capturingStoneY][capturingStoneX];
+        let capturingGroupSize = state.groupStoneSet[capturingGroupId].size;
+
+        if (capturedGroupSize === 1 && capturingGroupSize === 1) {
+            state.koX = x;
+            state.koY = y;
+        }
+
+        // Capture the stones
+        for (let stone of state.groupStoneSet[gid]) {
+            let [stoneX, stoneY] = stone.split('_').map(Number);
+            setVertex(state, stoneX, stoneY, '.');
+            if (updateGui) {
+                removeSvgStone(stoneX, stoneY);
+            }
+            // Remove stone from groupId
+            state.groupId[stoneY][stoneX] = '';
+        }
+        // After removal, update liberties of neighboring groups
+        for (let stone of state.groupStoneSet[gid]) {
+            let [stoneX, stoneY] = stone.split('_').map(Number);
+            addLiberty(state, stoneX, stoneY);
+        }
+        state.groupLibertySet.delete(gid);
+        state.groupStoneSet.delete(gid);
+    }
 }
 
 function removeSvgStone(x,y) {
@@ -685,7 +1076,7 @@ function addLiberty2(state, x, y, vertex) {
 		case 'E':
 			return;
 	}
-	state.groupLibertySet[state.groupId[x][y]].add(vertex);
+	state.groupLibertySet[state.groupId[y][x]].add(vertex);
 }
 
 function switchPlayer(state) {
@@ -731,24 +1122,27 @@ function isIllegalMove(state, x, y) {
 }
 
 function getVertex(state, x, y) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	if ((typeof y === 'undefined')||(typeof x === 'undefined'))
-		return 'E';
-	if (0 <= x && x < gridColumns && 0 <= y && y < gridRows) {
-		return state.boardText[y][x];
-	}
-	return 'E'; //TODO torus, cylinder
+    x = Math.floor(x);
+    y = Math.floor(y);
+    if ((typeof y === 'undefined') || (typeof x === 'undefined'))
+        return 'E';
+    var numRows = state.boardText.length;
+    var numCols = state.boardText[0].length;
+    if (0 <= x && x < numCols && 0 <= y && y < numRows) {
+        return state.boardText[y][x];
+    }
+    return 'E';
 }
 
 function setVertex(state, x, y, char) {
 	x=Math.floor(x);
 	y=Math.floor(y);
 	//console.log('setVertex', x, y, char);
-	if (0 <= x && x < gridColumns && 0 <= y && y < gridRows) {
+    var numRows = state.boardText.length;
+    var numCols = state.boardText[0].length;
+	if (0 <= x && x < numCols && 0 <= y && y < numRows) {
 		state.boardText[y][x] = char;
 	}
-	//TODO torus, cylinder
 }
 
 function getVertexLibertyAmount(state, x, y) {
@@ -757,10 +1151,9 @@ function getVertexLibertyAmount(state, x, y) {
 	//for convenience, empty vertices will also have liberties.
 	if (0 <= x && x < gridColumns && 0 <= y && y < gridRows) {
 		if (getVertex(state, x, y)!='.') {
-			return state.groupLibertySet[state.groupId[x][y]].size;
+			return state.groupLibertySet[state.groupId[y][x]].size;
 		}
 	}
-	//TODO torus, cylinder
 	return -1;
 }
 
@@ -902,71 +1295,55 @@ function initLegalMoves(state) {
 }
 
 function paintGroupId(state, x, y, id) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
-		return;
-	switch(getVertex(state, x, y)){
-		case 'E':
-		case '.':
-			return;
-	}
-	state.groupId[x][y] = id;
-	//console.log('set',groupId[x][y],x,y,id);
-	state.groupStoneSet[id].add(x +'_'+ y);
-	if(x + 1 < gridColumns){
-		if (getVertex(state, x + 1, y) === '.')
-			state.groupLibertySet[id].add((x + 1)+'_'+ y);
-		if (getVertex(state, x + 1, y) === getVertex(state, x, y))
-			if(state.groupId[x + 1][y] !== id) {
-			paintGroupId(state, x + 1, y, id);
-		}
-	}
-	if(x > 0){
-		if (getVertex(state, x - 1, y) === '.')
-			state.groupLibertySet[id].add((x - 1)+'_'+ y);
-			if (getVertex(state, x - 1, y) === getVertex(state, x, y))
-		if(state.groupId[x - 1][y] !== id) {
-			paintGroupId(state, x - 1, y, id);
-		}
-	}
-	if(y + 1 < gridRows){
-		if (getVertex(state, x, y + 1) === '.')
-			state.groupLibertySet[id].add(x+'_'+ (y+1))
-		if (getVertex(state, x, y + 1) === getVertex(state, x, y))
-			if(state.groupId[x][y + 1] !== id) {
-			paintGroupId(state, x, y + 1, id);
-		}
-	}
-	if(y > 0){
-		if (getVertex(state, x, y - 1) === '.')
-			state.groupLibertySet[id].add(x+'_'+ (y-1))
-		if (getVertex(state, x, y - 1) === getVertex(state, x, y))
-			if(state.groupId[x][y - 1] !== id) {
-			paintGroupId(state, x, y - 1, id);
-		}
-	}
+    x = Math.floor(x);
+    y = Math.floor(y);
+    var numRows = state.boardText.length;
+    var numCols = state.boardText[0].length;
+    if ((numCols <= x) || (x < 0) || (numRows <= y) || (y < 0)) return;
+    if (getVertex(state, x, y) === '.' || getVertex(state, x, y) === 'E') return;
+    
+    state.groupId[y][x] = id;
+    state.groupStoneSet[id].add(x + '_' + y);
+    
+    // Check adjacent positions
+    const directions = [
+        { dx: 1, dy: 0 },
+        { dx: -1, dy: 0 },
+        { dx: 0, dy: 1 },
+        { dx: 0, dy: -1 }
+    ];
+    
+    directions.forEach(({ dx, dy }) => {
+        let nx = x + dx;
+        let ny = y + dy;
+        if (getVertex(state, nx, ny) === '.') {
+            state.groupLibertySet[id].add(nx + '_' + ny);
+        } else if (getVertex(state, nx, ny) === getVertex(state, x, y)) {
+            if (state.groupId[ny][nx] !== id) {
+                paintGroupId(state, nx, ny, id);
+            }
+        }
+    });
 }
 
 function recalculateLiberties(state) {
-	state.groupId = [];
-	state.groupLibertySet = new Map();
-	state.groupStoneSet = new Map();
-	for (var x = 0; x < gridColumns; x++) {
-		state.groupId[x] = new Array(gridRows);
-		for (var y = 0; y < gridRows; y++) {
-			state.groupId[x][y] = '';
-		}
-	}
-	for (var x = 0; x < gridColumns; x++) {
-		for (var y = 0; y < gridRows; y++) {
-			if ((getVertex(state, x, y) != '.') && (state.groupId[x][y] === '')) {
-				state.groupStoneSet[x + '_' + y]=new Set();
-				state.groupLibertySet[x + '_' + y]=new Set();
-				paintGroupId(state, x, y, x + '_' + y);
-			}
-		}
-	}
+    state.groupId = [];
+    state.groupLibertySet = new Map();
+    state.groupStoneSet = new Map();
+    var numRows = state.boardText.length;
+    var numCols = state.boardText[0].length;
+    for (var y = 0; y < numRows; y++) {
+        state.groupId[y] = new Array(numCols).fill('');
+    }
+    for (var y = 0; y < numRows; y++) {
+        for (var x = 0; x < numCols; x++) {
+            if ((getVertex(state, x, y) != '.') && (state.groupId[y][x] === '')) {
+                state.groupStoneSet[x + '_' + y] = new Set();
+                state.groupLibertySet[x + '_' + y] = new Set();
+                paintGroupId(state, x, y, x + '_' + y);
+            }
+        }
+    }
 }
 
 function redrawStones() {
