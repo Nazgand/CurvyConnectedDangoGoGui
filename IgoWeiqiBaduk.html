@@ -11,53 +11,67 @@
 			rect#board {fill: #fabd7f;}
 			rect#boardmargin {fill: grey;}
 			textarea {width:100%;font-size: 11px;}
+            svg#svgBoard {
+                display: block;
+                margin-left: auto;
+                margin-right: auto;
+                max-height: 100vh;
+                max-width: 100vh;
+            }
 		</style>
 	</head>
 	<body>
-		<svg id="svgBoard" viewBox="-0.6 -0.6 3.2 3.2" xmlns="http://www.w3.org/2000/svg">
+		<svg id="svgBoard" viewBox="-0.6 -0.6 3.2 3.2"
+			xmlns="http://www.w3.org/2000/svg">
 			<defs>
 				<mask id="FourCircles">
-					<rect x="0" y="0" width="1" height="1" fill="white"/>
-					<circle cx="0" cy="0" r="0.5" fill="black"/>
-					<circle cx="0" cy="1" r="0.5" fill="black"/>
-					<circle cx="1" cy="0" r="0.5" fill="black"/>
-					<circle cx="1" cy="1" r="0.5" fill="black"/>
+					<rect x="0" y="0" width="1" height="1" fill="white" />
+					<circle cx="0" cy="0" r="0.5" fill="black" />
+					<circle cx="0" cy="1" r="0.5" fill="black" />
+					<circle cx="1" cy="0" r="0.5" fill="black" />
+					<circle cx="1" cy="1" r="0.5" fill="black" />
 				</mask>
 				<symbol id="squareMinusFourCircles">
-					<rect x="0" y="0" width="1" height="1" mask="url(#FourCircles)"/>
+					<rect x="0" y="0" width="1" height="1" mask="url(#FourCircles)" />
 				</symbol>
 			</defs>
-			<rect id="boardmargin" x="-0.6" y="-0.6" rx="0.6" ry="0.6" width="3.2" height="3.2"/>
-			<rect id="board" x="-0.5" y="-0.5" rx="0.5" ry="0.5" width="3" height="3"/>
-			<g id="grid"/>
-			<g id="different2"/>
-			<g id="same3"/>
-			<g id="same2"/>
-			<g id="stones"/>
-			<circle class="player1" id="nextMove" cx="-2" cy="-2" r="0.45" fill-opacity="0.5" stroke="#7f7f7f" stroke-width="0.1"/>
+			<rect id="boardmargin" x="-0.6" y="-0.6" rx="0.6" ry="0.6" width="3.2"
+				height="3.2" />
+			<rect id="board" x="-0.5" y="-0.5" rx="0.5" ry="0.5" width="3" height="3" />
+			<g id="grid" />
+			<g id="different2" />
+			<g id="same3" />
+			<g id="same2" />
+			<g id="stones" />
+			<circle class="player1" id="nextMove" cx="-2" cy="-2" r="0.45"
+				fill-opacity="0.5" stroke="#7f7f7f" stroke-width="0.1" />
 		</svg>
-		<hr/>ac
+		<hr />
 		<select name="mousemode" onchange="mouseMode=this.value;">
 			<option value="singleClickToMove">Single-click to place stones.</option>
 			<option value="doubleClickToMove">Double-click to place stones.</option>
 		</select>
 		<button type="button" onclick="pass();">Pass</button>
-		<span style="white-space: nowrap">[Player <span id="playerIndicator">1</span> to move.]</span>
-		<span style="white-space: nowrap">[Goto move <input type="number" id="move" name="move" min="0" max="0" value="0" onchange="undo();">]</span>
+		<span style="white-space: nowrap">[Player <span id="playerIndicator">1</span>
+			to move.]</span>
+		<span style="white-space: nowrap">[Goto move <input type="number" id="move"
+				name="move" min="0" max="0" value="0" onchange="undo();">]</span>
 		<select name="capturemode" onchange="captureMode=this.value;">
 			<option value="removeStones">Capture removes stones.</option>
 			<option value="flipStones">Capture flips stones.</option>
 		</select>
-		<hr/>
+		<hr />
 		EastWest:
-		<input id="width" name="width" type="number" min="1" value="9"/>
+		<input id="width" name="width" type="number" min="1" value="9" />
 		NorthSouth:
-		<input id="height" name="height" type="number" min="1" value="9"/>
+		<input id="height" name="height" type="number" min="1" value="9" />
 		<button type="button" onclick="freshBoard();">Fresh board</button>
-		<br/>
-		<button type="button" onclick="initBoardWithText(document.querySelector('textarea[name=\'importPosition\']').value);">Import position</button>
+		<br />
+		<button type="button"
+			onclick="initBoardWithText(document.querySelector('textarea[name=\'importPosition\']').value);">Import
+			position</button>
 		<button type="button" onclick="exportPosition();">Export position</button>
-		<br/>
+		<br />
 		<textarea name="importPosition" rows="30" cols="90">
 GNU Go and Leela Zero terminal board positions accepted!
 The only characters that will be parsed are: '.', '+', 'O', 'X', '\n'!
@@ -85,9 +99,6 @@ The only characters that will be parsed are: '.', '+', 'O', 'X', '\n'!
 The lines that have less valid characters than the line with the most valid characters will be culled.
 		</textarea>
 
-
-
-
 		<script>
 //TODO: game-tree, SmartGameFormat support
 
@@ -109,41 +120,127 @@ var numberWidth = document.getElementById('width');
 var numberHeight = document.getElementById('height');
 
 var mouseMode = 'singleClickToMove';
+// Add the red X to the board
+let svgBoardIllegalMove = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+let line1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+let line2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+
+// Configure the lines for the red X
+line1.setAttribute('stroke', 'red');
+line1.setAttribute('stroke-width', '0.1');  // Adjust thickness as needed
+line2.setAttribute('stroke', 'red');
+line2.setAttribute('stroke-width', '0.1');  // Adjust thickness as needed
+
+svgBoardIllegalMove.appendChild(line1);
+svgBoardIllegalMove.appendChild(line2);
+svgBoard.appendChild(svgBoardIllegalMove);  // Add the X to the SVG
+
+// Initially hide the red X
+svgBoardIllegalMove.style.display = 'none';
+
 svgBoard.onmousemove = function(e) {
-	gridX = Math.min(gridColumns, Math.max(0, Math.round(-0.5 +
-		gridColumns * (e.clientX - svgBoard.getBoundingClientRect().x) / svgBoard.clientWidth)));
-	gridY = Math.min(gridRows, Math.max(0, Math.round(-0.5 +
-		gridRows * (e.clientY - svgBoard.getBoundingClientRect().y) / svgBoard.clientHeight)));
-	if (isIllegalMove(boardStates[stateIndex], gridX, gridY)) {
-		gridX = gridY = -2;
-	}
-	svgBoardNextMove.setAttribute('cx', gridX);
-	svgBoardNextMove.setAttribute('cy', gridY);
-}
+    let rect = svgBoard.getBoundingClientRect();
+
+    // Determine the margin size (converted to pixel units)
+    let marginSizeX = rect.width * boardMarginWidth / (gridColumns + 2 * boardMarginWidth);
+    let marginSizeY = rect.height * boardMarginWidth / (gridRows + 2 * boardMarginWidth);
+
+    // Calculate mouse position relative to the board, excluding the margin
+    let mouseX = e.clientX - rect.left - marginSizeX;
+    let mouseY = e.clientY - rect.top - marginSizeY;
+
+    // Calculate grid positions within the playable board
+    let boardWidth = rect.width - 2 * marginSizeX;
+    let boardHeight = rect.height - 2 * marginSizeY;
+
+    if (mouseX >= 0 && mouseX <= boardWidth && mouseY >= 0 && mouseY <= boardHeight) {
+        let gridX = Math.floor(gridColumns * mouseX / boardWidth);
+        let gridY = Math.floor(gridRows * mouseY / boardHeight);
+
+        // Update the position of the phantom stone
+        svgBoardNextMove.setAttribute('cx', gridX);
+        svgBoardNextMove.setAttribute('cy', gridY);
+
+        if (isIllegalMove(boardStates[stateIndex], gridX, gridY)) {
+            // If the move is illegal, show the red X
+            svgBoardIllegalMove.style.display = 'block';
+
+            // Position the red X over the phantom stone
+            line1.setAttribute('x1', gridX - 0.4);
+            line1.setAttribute('y1', gridY - 0.4);
+            line1.setAttribute('x2', gridX + 0.4);
+            line1.setAttribute('y2', gridY + 0.4);
+
+            line2.setAttribute('x1', gridX - 0.4);
+            line2.setAttribute('y1', gridY + 0.4);
+            line2.setAttribute('x2', gridX + 0.4);
+            line2.setAttribute('y2', gridY - 0.4);
+        } else {
+            // If the move is legal, hide the red X
+            svgBoardIllegalMove.style.display = 'none';
+        }
+    } else {
+        // Mouse is outside the playable board, hide the phantom stone and the X
+        svgBoardNextMove.setAttribute('cx', -2);
+        svgBoardNextMove.setAttribute('cy', -2);
+        svgBoardIllegalMove.style.display = 'none';
+    }
+};
 svgBoard.onmouseout = function(e) {
 	svgBoardNextMove.setAttribute('cx', -2);
 	svgBoardNextMove.setAttribute('cy', -2);
 }
+// Double-click to place stones
 svgBoard.ondblclick = function(e) {
-	gridX = Math.min(gridColumns, Math.max(0, Math.round(-0.5 +
-		gridColumns * (e.clientX - svgBoard.getBoundingClientRect().x) / svgBoard.clientWidth)));
-	gridY = Math.min(gridRows, Math.max(0, Math.round(-0.5 +
-		gridRows * (e.clientY - svgBoard.getBoundingClientRect().y) / svgBoard.clientHeight)));
-	switch (mouseMode) {
-		case 'doubleClickToMove':
-			guiPlayMove(gridX,gridY);
-	}
-}
+    let rect = svgBoard.getBoundingClientRect();
+
+    // Determine the margin size (converted to pixel units)
+    let marginSizeX = rect.width * boardMarginWidth / (gridColumns + 2 * boardMarginWidth);
+    let marginSizeY = rect.height * boardMarginWidth / (gridRows + 2 * boardMarginWidth);
+
+    // Calculate mouse position relative to the board, excluding the margin
+    let mouseX = e.clientX - rect.left - marginSizeX;
+    let mouseY = e.clientY - rect.top - marginSizeY;
+
+    // Calculate grid positions within the playable board
+    let boardWidth = rect.width - 2 * marginSizeX;
+    let boardHeight = rect.height - 2 * marginSizeY;
+
+    if (mouseX >= 0 && mouseX <= boardWidth && mouseY >= 0 && mouseY <= boardHeight) {
+        let gridX = Math.floor(gridColumns * mouseX / boardWidth);
+        let gridY = Math.floor(gridRows * mouseY / boardHeight);
+
+        if (!isIllegalMove(boardStates[stateIndex], gridX, gridY) && mouseMode === 'doubleClickToMove') {
+            guiPlayMove(gridX, gridY);
+        }
+    }
+};
+
+// Single-click to place stones
 svgBoard.onclick = function(e) {
-	gridX = Math.min(gridColumns, Math.max(0, Math.round(-0.5 +
-		gridColumns * (e.clientX - svgBoard.getBoundingClientRect().x) / svgBoard.clientWidth)));
-	gridY = Math.min(gridRows, Math.max(0, Math.round(-0.5 +
-		gridRows * (e.clientY - svgBoard.getBoundingClientRect().y) / svgBoard.clientHeight)));
-	switch (mouseMode) {
-		case 'singleClickToMove':
-			guiPlayMove(gridX,gridY);
-	}
-}
+    let rect = svgBoard.getBoundingClientRect();
+
+    // Determine the margin size (converted to pixel units)
+    let marginSizeX = rect.width * boardMarginWidth / (gridColumns + 2 * boardMarginWidth);
+    let marginSizeY = rect.height * boardMarginWidth / (gridRows + 2 * boardMarginWidth);
+
+    // Calculate mouse position relative to the board, excluding the margin
+    let mouseX = e.clientX - rect.left - marginSizeX;
+    let mouseY = e.clientY - rect.top - marginSizeY;
+
+    // Calculate grid positions within the playable board
+    let boardWidth = rect.width - 2 * marginSizeX;
+    let boardHeight = rect.height - 2 * marginSizeY;
+
+    if (mouseX >= 0 && mouseX <= boardWidth && mouseY >= 0 && mouseY <= boardHeight) {
+        let gridX = Math.floor(gridColumns * mouseX / boardWidth);
+        let gridY = Math.floor(gridRows * mouseY / boardHeight);
+
+        if (!isIllegalMove(boardStates[stateIndex], gridX, gridY) && mouseMode === 'singleClickToMove') {
+            guiPlayMove(gridX, gridY);
+        }
+    }
+};
 
 function guiPlayMove(x,y) {
 	x=Math.floor(x);
@@ -825,7 +922,6 @@ exampleText=`
   2 . . . O X X . . . 2
   1 . . . O O X . . . 1
 `;
-/**/
 initBoardWithText(exampleText);
 		</script>
 	</body>
