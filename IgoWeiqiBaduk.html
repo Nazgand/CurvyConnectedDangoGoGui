@@ -140,7 +140,9 @@ The lines that have less valid characters than the line with the most valid char
 		</textarea>
 
 		<script>
-var nodeIdCounter = 0;
+let nodeIdCounter = 0;
+let rootNode;
+let currentNode;
 
 function Node(state, parent, move, moveNumber) {
     this.id = nodeIdCounter++; // Unique node ID
@@ -150,8 +152,6 @@ function Node(state, parent, move, moveNumber) {
     this.move = move; // The move that led to this state
     this.moveNumber = moveNumber; // The move number at this node
 }
-var rootNode;
-var currentNode;
 
 function updateGameTreeView() {
     let gameTreeElement = document.getElementById('gameTree');
@@ -166,7 +166,7 @@ function updateGameTreeView() {
 function buildGameTreeView(node, parentElement) {
     let li = document.createElement('li');
 	li.textContent = node.moveNumber + (node.move ? ': ' + node.move.player + ' (' + node.move.x + ',' + node.move.y + ')' : ': Root');
-    li.onclick = function () {
+    li.onclick = function (event) {
         event.stopPropagation(); // Prevent event bubbling
         currentNode = node;
         recalculateLiberties(currentNode.state);
@@ -200,33 +200,34 @@ function highlightSelectedNode() {
     }
 }
 
-boardMarginWidth = 0.1;
-gridLineWidth = 0.1;
-gridRows = 1;
-gridColumns = 1;
+const boardMarginWidth = 0.1;
+const gridLineWidth = 0.1;
+let gridRows = 1;
+let gridColumns = 1;
 
-var playerIndicator = document.getElementById('playerIndicator');
-var svgBoard = document.getElementById('svgBoard');
-var svgBoardMargin = svgBoard.getElementById('boardmargin');
-var svgBoardBoard = svgBoard.getElementById('board');
-var svgBoardGrid = svgBoard.getElementById('grid');
-var svgBoardStones = svgBoard.getElementById('stones');
-var svgBoardNextMove = svgBoard.getElementById('nextMove');
+let playerIndicator = document.getElementById('playerIndicator');
+let svgBoard = document.getElementById('svgBoard');
+let svgBoardMargin = svgBoard.getElementById('boardmargin');
+let svgBoardBoard = svgBoard.getElementById('board');
+let svgBoardGrid = svgBoard.getElementById('grid');
+let svgBoardStones = svgBoard.getElementById('stones');
+let svgBoardNextMove = svgBoard.getElementById('nextMove');
 
-var numberWidth = document.getElementById('width');
-var numberHeight = document.getElementById('height');
+let numberWidth = document.getElementById('width');
+let numberHeight = document.getElementById('height');
 
-var mouseMode = 'singleClickToMove';
+let mouseMode = 'singleClickToMove';
 // Add the red X to the board
 let svgBoardIllegalMove = document.createElementNS('http://www.w3.org/2000/svg', 'g');
 let line1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
 let line2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
 
 // Configure the lines for the red X
+const X_STROKE_WIDTH = 0.1;
 line1.setAttribute('stroke', 'red');
-line1.setAttribute('stroke-width', '0.1');  // Adjust thickness as needed
+line1.setAttribute('stroke-width', X_STROKE_WIDTH);  // Adjust thickness as needed
 line2.setAttribute('stroke', 'red');
-line2.setAttribute('stroke-width', '0.1');  // Adjust thickness as needed
+line2.setAttribute('stroke-width', X_STROKE_WIDTH);  // Adjust thickness as needed
 
 svgBoardIllegalMove.appendChild(line1);
 svgBoardIllegalMove.appendChild(line2);
@@ -439,7 +440,12 @@ function parseSGF(sgfContent) {
         index++;
         return value;
     }
-    return parseCollection();
+    try{
+        return parseCollection();
+    } catch (error) {
+        console.error('Error parsing SGF at index', index, ':', error);
+        throw error;
+    }
 }
 
 function charToInt(c) {
@@ -867,7 +873,7 @@ function playMove(state, x, y, updateGui, doSwitchPlayer = true) {
     state.koX = -1;
     setVertex(state, x, y, state.playerToMove);
     if (updateGui) {
-        drawSvgStoneWithEffects(x, y);
+        drawSvgStone(x, y, true);
     }
     var vertex = x + '_' + y;
     state.groupStoneSet[vertex] = new Set([vertex]);
@@ -929,15 +935,22 @@ function updatePlayerToMove() {
 }
 
 function pass() {
-	cutOffExtraStates();
-	boardStates.push(JSON.parse(JSON.stringify(currentNode.state)));
-	stateIndex++;
-	recalculateLiberties(currentNode.state);
-	initLegalMoves(currentNode.state);
-	currentNode.state.koY=-1;
-	switchPlayer(currentNode.state);
-	updatePlayerToMove();
-	svgBoardNextMove.setAttribute('cy', -3);
+    // Create a new state by copying the current state
+    let newState = copyState(currentNode.state);
+
+    // Update the player to move
+    newState.playerToMove = switchPlayer2(newState.playerToMove);
+
+    // Create a new node for the pass move
+    let newNode = new Node(newState, currentNode, { x: -1, y: -1, player: currentNode.state.playerToMove }, currentNode.moveNumber + 1);
+    currentNode.children.push(newNode);
+    currentNode = newNode;
+
+    updatePlayerToMove();
+    redrawStones();
+    redrawEffects();
+    updateGameTreeView();
+    highlightSelectedNode();
 }
 
 function mergeGroups(state, x, y, id2) {
@@ -1022,37 +1035,6 @@ function removeSvgStone(x,y) {
 	for (e of svgBoard.querySelectorAll('.vertex'+x+'_'+y)){
 		e.parentElement.removeChild(e);
 	}
-}
-
-function drawSvgStoneWithEffects(x,y) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
-		return;
-	removeSvgStone(x,y);
-	if (getCurVertex(x, y) != '.') {
-		newStone = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-		newStone.setAttribute('cx', x);
-		newStone.setAttribute('cy', y);
-		newStone.setAttribute('r', 0.5);
-		targetClass='vertex'+x+'_'+y;
-		switch (getCurVertex(x, y)) {
-			case 'X':
-				newStone.setAttribute('class', targetClass+' player1');
-				break;
-			case 'O':
-				newStone.setAttribute('class', targetClass+' player2');
-		}
-		svgBoardStones.appendChild(newStone);
-	}
-	drawHorizontalRectEffect(x-1,y);
-	drawHorizontalRectEffect(x,y);
-	drawVerticalRectEffect(x,y-1);
-	drawVerticalRectEffect(x,y);
-	drawCompare3Effect(x-1,y);
-	drawCompare3Effect(x,y);
-	drawCompare3Effect(x-1,y-1);
-	drawCompare3Effect(x,y-1);
 }
 
 function addLiberty(state, x, y) {
@@ -1244,15 +1226,16 @@ function exportPosition() {
 	document.querySelector('textarea[name=\'importPosition\']').value = stringBoard;
 }
 
+function initializeBoardSize(rows, columns) {
+    gridRows = rows;
+    gridColumns = columns;
+    resizeSvgBoard();
+}
+
 function freshBoard() {
-    eastWest = Math.ceil(numberWidth.value);
-    northSouth = Math.ceil(numberHeight.value);
-    if (gridRows != northSouth || gridColumns != eastWest) {
-        gridRows = northSouth;
-        gridColumns = eastWest;
-        console.log('Detected board size change', gridRows, gridColumns);
-        resizeSvgBoard();
-    }
+    let eastWest = Math.ceil(numberWidth.value);
+    let northSouth = Math.ceil(numberHeight.value);
+    initializeBoardSize(northSouth, eastWest);
 
     let initialState = {
         boardText: [],
@@ -1361,26 +1344,37 @@ function getCurVertex(x, y) {
 	return getVertex(currentNode.state, x, y);
 }
 
-function drawSvgStone(x,y) {
-	x=Math.floor(x);
-	y=Math.floor(y);
-	if((gridColumns<=x)||(x<0)||(gridRows<=y)||(y<0))
-		return;
-	if (getCurVertex(x, y) != '.') {
-		newStone = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-		newStone.setAttribute('cx', x);
-		newStone.setAttribute('cy', y);
-		newStone.setAttribute('r', 0.5);
-		targetClass='vertex'+x+'_'+y;
-		switch (getCurVertex(x, y)) {
-			case 'X':
-				newStone.setAttribute('class', targetClass+' player1');
-				break;
-			case 'O':
-				newStone.setAttribute('class', targetClass+' player2');
-		}
-		svgBoardStones.appendChild(newStone);
-	}
+function drawSvgStone(x, y, withEffects = false) {
+    x = Math.floor(x);
+    y = Math.floor(y);
+    if((gridColumns <= x) || (x < 0) || (gridRows <= y) || (y < 0))
+        return;
+    removeSvgStone(x, y);
+    if (getCurVertex(x, y) != '.') {
+        let newStone = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        newStone.setAttribute('cx', x);
+        newStone.setAttribute('cy', y);
+        newStone.setAttribute('r', 0.5);
+        let targetClass = 'vertex' + x + '_' + y;
+        switch (getCurVertex(x, y)) {
+            case 'X':
+                newStone.setAttribute('class', targetClass + ' player1');
+                break;
+            case 'O':
+                newStone.setAttribute('class', targetClass + ' player2');
+        }
+        svgBoardStones.appendChild(newStone);
+        if (withEffects) {
+            drawHorizontalRectEffect(x - 1, y);
+            drawHorizontalRectEffect(x, y);
+            drawVerticalRectEffect(x, y - 1);
+            drawVerticalRectEffect(x, y);
+            drawCompare3Effect(x - 1, y);
+            drawCompare3Effect(x, y);
+            drawCompare3Effect(x - 1, y - 1);
+            drawCompare3Effect(x, y - 1);
+        }
+    }
 }
 
 function drawHorizontalRectEffect(x,y) {
@@ -1562,13 +1556,14 @@ initBoardWithText(exampleText);
 var inScoringMode = false;
 var territoryMap = [];
 
+let toggleScoringButton = document.getElementById('toggleScoringButton');
 function toggleScoringMode() {
     if (inScoringMode) {
         exitScoringMode();
-        document.getElementById('toggleScoringButton').textContent = 'Score';
+        toggleScoringButton.textContent = 'Score';
     } else {
         enterScoringMode();
-        document.getElementById('toggleScoringButton').textContent = 'Exit Scoring Mode';
+        toggleScoringButton.textContent = 'Exit Scoring Mode';
     }
 }
 
