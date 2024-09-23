@@ -4,7 +4,7 @@ HTML5 Curvy Connected Dango Go Gui
 This is a stand-alone HTML file. download it and open it with a web browser to use it.
 
 # Screenshot
-![Screenshot](Screenshot_20240921_063024.png?raw=true "Screenshot")
+![Screenshot](Screenshot_20240923_040950.png?raw=true "Screenshot")
 
 # Current Features
 One can play a game of Go
