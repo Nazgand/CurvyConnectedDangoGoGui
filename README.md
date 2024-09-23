@@ -9,6 +9,8 @@ This is a stand-alone HTML file. download it and open it with a web browser to u
 # Current Features
 One can play a game of Go
 
+Scoring mode
+
 Game tree
 
 Rectangular boards
