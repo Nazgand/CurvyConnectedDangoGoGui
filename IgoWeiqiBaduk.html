@@ -1632,7 +1632,7 @@ function updateScoringGUI() {
                 square.setAttribute('height', 0.4);
                 square.setAttribute('fill', owner === 'X' ? 'black' : 'white');
                 square.setAttribute('opacity', 0.5);
-                square.setAttribute('stroke', 'blue');
+                square.setAttribute('stroke', owner === 'X' ? 'blue' : 'green');
                 square.setAttribute('stroke-width', 0.039);
                 territoryLayer.appendChild(square);
             }
